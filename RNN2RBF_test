@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Sep  6 14:45:36 2019
+
+@author: kschen
+"""
+
+import numpy as np
+import scipy as sp
+import seaborn as sns
+sns.set_style("white")
+sns.set_context("talk")
+from sklearn.cluster import KMeans
+
+import matplotlib.pyplot as plt
+
+# %% Neural Network
+# %% 
+###Tij matrix
+N = 20
+temp = np.random.randn(1,N)
+T = np.dot(temp.T,temp)
+np.fill_diagonal(T,0)
+T = T/N
+
+K = 5  #number of patterns to store
+T = np.zeros((N,N))
+for ii in range(K):
+    rv = np.random.randn(1,N)
+    u,s,v = np.linalg.svd(np.dot(rv.T,rv))  #make orthogonal vectors
+    T = T + np.outer(u[:,ii],u[:,ii])  #store in Hopfield
+np.fill_diagonal(T,0)
+T = T/(N*K)  #normalization
+# %% 
+##multi-attractor model
+T = np.zeros((N,N))  #connectivity matrix
+deg2rad = np.pi/180
+ths = np.linspace(-90,90,N)*deg2rad  #preferred tuning direction
+for ii in range(N):
+    for jj in range(N):
+        T[ii,jj] = 0.5 + 1/N*np.cos((ths[ii]-ths[jj])/0.5)
+T = (T-np.mean(T))*5  ##??
+# %% 
+###sequence?
+temp = np.random.randn(1,N)
+T = np.dot(temp.T,temp)
+temp2 = np.eye(N)
+rr = np.arange(N)
+np.random.shuffle(rr)
+temp3 = np.take(temp2, rr, axis=0)  #seqeunce feedforward matrix
+T = T + temp3*50
+T = T/N
+
+# %%
+plt.imshow(T)
+plt.figure()
+plt.plot(T);
+# %% Neural dynamics
+###Nonlinearity
+def NL(u,the,bound):
+    NLed = np.array([max(ui-the,0) if (ui-the)<bound else bound for ui in u]) #ReLu with upper bound
+    return NLed
+
+###Dynamics
+TT = 5
+dt = 0.01
+time = np.arange(0,TT,dt)
+u = np.zeros((N,len(time)))
+u[:,0] = np.random.randn(N)
+tau = 0.05  #time scale
+the = 0  #threshold
+beta = .1  #global inhibition
+bound = 100  #upper bound for activation
+
+rep = 20  #instantiations
+us = np.zeros((rep,N,len(time)))
+for rr in range(rep):
+    u[:,:-1] = 0
+    u[:,0] = np.random.randn(N)*bound  #initial condition (scaled by a proper range!)
+    u[:,-1] = 0
+    for tt in range(0,len(time)-1):
+        u[:,tt+1] = u[:,tt] + dt*(-u[:,tt] + np.dot(T,NL(u[:,tt]-beta*np.sum(u[:,tt]),the,bound)))/tau \
+        + np.random.randn(N)*2.5
+        #u[:,tt+1] = u[:,tt] + dt*(-u[:,tt] + NL(np.dot(T,u[:,tt])-beta*np.sum(u[:,tt]),the))/tau + np.random.randn(N)*1.  
+    us[rr,:,:] = u
+    
+plt.imshow(u,aspect='auto')
+plt.figure()
+plt.plot(time,u.T);
+plt.xlabel('time')
+plt.ylabel('activity')
+
+# %% RBF network approximation
+# %% all functions here
+def sigma_avg(center):  #can be a learned parameter in the future too, here just using the mean of centroids first
+    """mean variance of centroids used in RBF network"""
+    sigma = np.mean(sp.spatial.distance.pdist(center))
+    return sigma
+
+def kernel_function(ci, center, data_point):  
+    """radial basis function"""
+    return np.exp(-1/(2*sigma_avg(center)**2) * np.linalg.norm(ci-data_point)**2)  ###shouldn't RBF be like this??
+
+def calculate_interpolation_matrix(center, X, hidden_shape):
+    """ Rachel's optimized version with 0 for loops B) """
+    diff = np.einsum('ij,ij->i',center,center)[:,None] + np.einsum('ij,ij->i',X,X) - 2*np.dot(center,X.T)
+    G = np.exp(-1/(2*sigma_avg(center)**2) * diff.T)
+    return (G.T/(G.sum(1)+10**-7)).T ###should be normalized??
+
+def ini_centroids(X, n_RBF, dim):
+    """
+    Initialize centroid positions with k-means
+    """
+    kmeans_vw = KMeans(n_clusters = n_RBF, random_state=0).fit(X)  #X should be samplexfeature (timexvariable)
+    sigma_mean = np.mean(sp.spatial.distance.pdist(kmeans_vw.cluster_centers_))
+    centroids_i = kmeans_vw.cluster_centers_
+    return centroids_i, sigma_mean
+
+def take_diff(X,dim):
+    """
+    Given sampled trajectories and return corresponding grid points and iteration steps for RBF training
+    """
+#    grid = []
+#    iteration = []
+#    for dd in range(0,dim):
+#        grid.append(X[:-1,dd])    #current steps
+#        iteration.append(X[1:,dd]) #next steps
+#    grid = np.array(grid).reshape()
+#    iteration = np.array(iteration).reshape()
+    grid = X[:-1,:]
+    iteration = X[1:,:]
+    return grid, iteration
+
+def RBFN_MSE(center, X, Y, hidden_shape, dim):  #calculating MSE of the recontructed traces, optimizing 'center'
+    """
+    Objective function to optimize centroid position during training
+    Given the centroids (objective), grid  X and iteration dX, hidden shape and dimensions,
+    calculated the RBF prediction and return MSE
+    """
+    center = np.reshape(center, (hidden_shape, dim)) ###important for optimization!!
+    G = calculate_interpolation_matrix(center, X, hidden_shape)
+    weights = np.dot(np.linalg.pinv(G), Y)
+    prediction = np.dot(G, weights)  #fit(center, X, Y, hidden_shape, G))
+    MSE = np.linalg.norm(prediction - Y)**2
+    return MSE
+
+def RBFN_train(X, n_RBF, dim):
+    """
+    Input sample grid X, it's time iteration dX, number of RBF used, and the model dimension dim
+    Return the optimal centroids and corresponding weights in RBF network
+    """ 
+    bnds = ((-100, 100),) * (n_RBF*dim) 
+    x0, sig_m = ini_centroids(X, n_RBF, dim)
+    grid, iteration = take_diff(X, dim)
+    res = sp.optimize.minimize(RBFN_MSE, x0, args=(grid, iteration, n_RBF, dim), bounds=bnds, options=dict({'maxiter':100}))
+    opt_centroids = res.x
+    opt_c = np.reshape(opt_centroids, (n_RBF, dim))
+    center = np.reshape(opt_c, (n_RBF, dim))
+    G = calculate_interpolation_matrix(center, grid, n_RBF)
+    weights = np.dot(np.linalg.pinv(G), iteration)
+    return opt_c, weights
+
+def RBFN_predict(center, weights, X, n_RBF, dim):
+    """
+    Given centroid positions, corresponding weight vector, and the sampled points, predict the next step in flow field
+    """
+    center = np.reshape(center, (n_RBF, dim)) ###important for optimization!!
+    G = calculate_interpolation_matrix(center, X, n_RBF)
+    prediction = np.dot(G, weights)
+    return prediction
+
+def Sample_model(model, nsamps, nstep):
+    """
+    Given a model and the initial points X, return the sampled trajectories for the next nstep steps
+    """
+    samples = []
+    dim = model.shape[1]  #model is time x dimension heatmap
+    pos = np.random.randint(model.shape[0]-nstep,size=(nsamps))
+    for pp in pos:
+        samples.append(model[pp:pp+nstep,:])
+    samples = np.array(samples).reshape(nstep*nsamps, dim)
+    return samples
+
+# %% train the RBF network
+nsamps = 20
+nstep = 5
+n_RBF = 10
+samples = Sample_model(u.T, nsamps, nstep)
+opt_c, weights = RBFN_train(samples, n_RBF, samples.shape[1])
+
+
