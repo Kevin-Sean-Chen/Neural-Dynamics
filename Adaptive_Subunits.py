@@ -17,13 +17,13 @@ sns.set_context("talk")
 # %% parameters
 #time
 dt = 0.1  #in units of 10 ms for speed
-T = 1000
+T = 2000
 time = np.arange(0,T,dt)
 
 #time scales
 tau_c = 2  #fast time scael in 10 ms
 tau_s = 5000  #slow time scale
-gamma = 0.1  #overlapping of subunit receptive field
+gamma = 0.05  #overlapping of subunit receptive field
 p0 = 100  #input synaptic strength
 q = 0.5  #probability to connect subunits and neuron
 #q0 = 1  #strength of subunit-neuron synapse
@@ -43,7 +43,7 @@ for kk in range(K):  #check for input unity
         Q[kk,:] = Q[kk,:]/sumsyn
         
 #adding inhibitory connnections
-pi = 0.5
+pi = 0.9
 signM = np.random.rand(Q.shape[0],Q.shape[1])
 signM[signM>pi] = 1
 signM[signM<=pi] = -1
@@ -60,15 +60,15 @@ for nn in range(N):
 
 # %% stimuli
 #marks
-fnum = 4  #number of unique frames in a sequence
+fnum = 8  #number of unique frames in a sequence
 dur = int(20/dt)  #duration of each frame in ms
 L = 10  #repeating the sequence
 mark = np.arange(0,fnum,1)
 mark2 = np.repeat(mark,dur,axis=0)
 marks = np.matlib.repmat(np.expand_dims(mark2,axis=1),L,1).reshape(-1)
 ### subs
-marks_ = np.matlib.repmat(np.expand_dims(mark2,axis=1),5,1).reshape(-1)
-marksub = np.array([0,1,4,3])
+marks_ = np.matlib.repmat(np.expand_dims(mark2,axis=1),6,1).reshape(-1)
+marksub = np.array([0,1,2,3,8,5,6,7])#np.array([0,1,4,3])
 marksub = np.repeat(marksub,dur,axis=0)
 marks = np.concatenate( (np.concatenate((marks_, marksub)),marks_ ) )
 ###
@@ -105,16 +105,32 @@ plt.figure()
 plt.plot(time,ys.T)
 
 # %% PSTH
-window = np.arange(2500,6500)
-ID = 23
+window = np.arange(7000,13000)
+ID = 29
 plt.figure()
 plt.subplot(211)
-plt.plot(time[window],marks[window])
+#plt.plot(time[window],marks[window])
+plt.plot(marks[window])
 plt.xticks([], [])
 plt.ylabel('frames')
 plt.subplot(212)
-plt.plot(time[window],ys[ID,window].T)
+#plt.plot(time[window],ys[ID,window].T)
+plt.plot(ys[ID,window].T)
 plt.xlabel('time')
 plt.ylabel('dF/F')
 
-
+# %% stats-test
+plt.figure()
+core = 1850+7000  #core response that would be subsituted
+subs = 3500+7000  #position that it is subsituted
+alld = np.zeros((K,3))  #neurons by delta-backwards
+for nn in range(0,K):
+    for ss in range(0,alld.shape[1]):
+        alld[nn,ss] = ys[nn,subs+ss*dur]/ys[nn,core+ss*dur]
+        
+for ss in range(0,alld.shape[1]):
+    plt.plot(alld[:,ss],label=str(ss)+'-back')
+plt.legend()
+plt.xlabel('neuron ID')
+plt.ylabel('relative response')
+plt.hlines(1,0,50,linestyles='dashed')
