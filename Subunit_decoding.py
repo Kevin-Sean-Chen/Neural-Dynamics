@@ -23,8 +23,8 @@ dt = 0.1  #in units of 10 ms for speed
 T = 2000
 time = np.arange(0,T,dt)
 #time scales
-tau_c = 2  #fast time scael in 10 ms
-tau_s = 5000  #slow time scale
+tau_c = 5  #fast time scael in 10 ms
+tau_s = 500  #slow time scale
 gamma = 0.05  #overlapping of subunit receptive field
 p0 = 100  #input synaptic strength
 q = 0.5  #probability to connect subunits and neuron
@@ -43,7 +43,7 @@ for kk in range(K):  #check for input unity
     else:
         Q[kk,:] = Q[kk,:]/sumsyn      
 #adding inhibitory connnections
-pi = 0.9
+pi = 0.5
 signM = np.random.rand(Q.shape[0],Q.shape[1])
 signM[signM>pi] = 1
 signM[signM<=pi] = -1
@@ -65,11 +65,14 @@ def stimuli():
     #marks
     fnum = 4  #number of unique frames in a sequence
     dur = int(20/dt)  #duration of each frame in ms
-    L = 20  #repeating the sequence
+    L = 10  #repeating the sequence
     mark = np.random.choice(N, fnum, replace=False)  #np.arange(0,fnum,1)
     seq_trans = mark[-1]
     mark2 = np.repeat(mark,dur,axis=0)
-    marks = np.matlib.repmat(np.expand_dims(mark2,axis=1),L,1).reshape(-1)
+    marks_ = np.matlib.repmat(np.expand_dims(mark2,axis=1),L,1).reshape(-1)
+    marksub = np.array([0,1,2,4])  #np.array([0,1,2,3,8,5,6,7])
+    marksub = np.repeat(marksub,dur,axis=0)
+    marks = np.concatenate((marks_, marksub)) #np.concatenate( (np.concatenate((marks_, marksub)),marks_ ) )
     ###
     if len(marks)>len(time):
         marks = marks[:len(time)]
@@ -78,6 +81,12 @@ def stimuli():
     seq_mark = np.zeros_like(marks)
     seq_mark[np.where(marks==seq_trans)[0]] = 1
     return marks, seq_mark  #marks for each frame and seq_mark for each sequence
+
+def NL(x):
+    """
+    Nonlinearity, using ReLu here
+    """
+    return np.array( [max(xx,0) for xx in x] )
 
 def subunit_model(marks):
     """
@@ -101,24 +110,26 @@ def subunit_model(marks):
         else:
             xs[:,tt+1] = xs[:,tt] + dt*(1/tau_c)*(-xs[:,tt] + alphas[:,tt]*P[I_index,:])  #subunit
             alphas[:,tt+1] = alphas[:,tt] + dt*(1/tau_s)*((1-alphas[:,tt]) - alphas[:,tt]*P[I_index,:])  #adaptation
-        ys[:,tt+1] = ys[:,tt] + dt*(1/tau_c)*(-ys[:,tt] + np.matmul(Q,xs[:,tt]))  #neurons
+        ys[:,tt+1] = ys[:,tt] + dt*(1/tau_c)*(-ys[:,tt] + NL(np.matmul(Q,xs[:,tt])) )  #neurons
     return ys
 
 # %% analysis
-def Measure_rij(rep):
+def Measure_rij(rep, dur):
     """
     Compute neurons x sequences response profile for decoding
     """
     #max_frameID = np.max(np.unique(marks))-2
+    #dur = 500
     marks, seq_mark = stimuli()
     transitions = np.where(np.diff(seq_mark)>0)[0] #np.where(np.diff(marks)<0)[0]  #should be otherwize
-    trans = transitions[:2]  #transient sequence
-    sust = transitions[-2:]  #sustain sequence
+    trans = transitions[5]  #transient sequence
+    sust = transitions[-1]  #sustain sequence
     yss = []
     for jj in range(0,rep):
         marks, seq_mark = stimuli()
         ys = subunit_model(marks)
-        yss.append(np.array([ys[:,trans[0]:trans[1]],ys[:,sust[0]:sust[1]]]))
+        yss.append(np.array([ys[:,sust:sust+dur], ys[:,trans:trans+dur]]))  #sustain and transient response
+#        yss.append(np.array([ys[:,trans[0]:trans[0]+dur],ys[:,sust[0]:sust[1]]]))
     return yss  #2 x K x T (0 for transient and 1 for sustain measurements)
     
 
@@ -136,7 +147,8 @@ def MLE_decording(r_ij):
 
 # %% experimental trials
 trials = 30
-yss = Measure_rij(trials)
+dur = 400
+yss = Measure_rij(trials, dur)
 trials_t = []
 trials_s = []
 for k in range(0,trials):
@@ -144,6 +156,18 @@ for k in range(0,trials):
     trials_s.append(np.mean(yss[k][1],axis=1))
 trials_t = np.array(trials_t)
 trials_s = np.array(trials_s)
+
+# %% sorting confusion matrix
+plt.figure()
+plt.subplot(211)
+plt.title('sustained type')
+#temp = trials_s[:,np.argmax(trials_s, axis=1)]
+plt.imshow(trials_s[np.argmax(trials_s, axis=0),:],aspect='auto')
+plt.subplot(212)
+plt.title('transient type')
+plt.imshow(trials_t[np.argmax(trials_t, axis=0),:],aspect='auto')
+plt.xlabel('sorted cell index')
+plt.ylabel('sorted stimuli index')
 
 # %% clustering sequential response
 kmeans_t = KMeans(n_clusters=trials).fit(trials_t)
@@ -160,13 +184,44 @@ clf = SVC(gamma='auto')
 yy = np.arange(0,trials)
 performance_t = []
 performance_s = []
-for kk in range(2,K,5):
+cellnum = np.arange(2,K,5)
+for kk in cellnum:
     temp_rt = trials_t[:,:kk]
     temp_rs = trials_s[:,:kk]
     clf.fit(temp_rt, np.arange(0,trials)) 
     performance_t.append(clf.score(temp_rs,yy))
     clf.fit(temp_rs, np.arange(0,trials)) 
     performance_s.append(clf.score(temp_rt,yy))
+ 
+plt.title('population decoding')
+plt.plot(cellnum,performance_t,'-o',label='sustain')
+plt.plot(cellnum,performance_s,'-o',label='transient')
+plt.xlabel('number of cells')
+plt.ylabel('performance')
+plt.legend()
+
+# %% with cross-validation
+###############################################################################
+# %% SVM classification
+clf = SVC(gamma='auto')
+half = int(trials/2)
+clf.fit(trials_t[:half,:], np.arange(0,half)) 
+print(clf.score(trials_t[half:,:], np.arange(0,half)) )
+clf.fit(trials_s[:half,:], np.arange(0,half)) 
+print(clf.score(trials_s[half:,:], np.arange(0,half)) )
+
+# %% scaling of population coding
+clf = SVC(gamma='auto')
+yy = np.arange(0,half)
+performance_t = []
+performance_s = []
+for kk in range(5,K,5):
+    temp_rt = trials_t[:half,:kk]
+    temp_rs = trials_s[:half,:kk]
+    clf.fit(temp_rt, np.arange(0,half)) 
+    performance_t.append(clf.score(trials_t[half:,:kk],yy))
+    clf.fit(temp_rs, np.arange(0,half)) 
+    performance_s.append(clf.score(trials_s[half:,:kk],yy))
  
 plt.title('population decoding')
 plt.plot(performance_t,'-o',label='transient')
