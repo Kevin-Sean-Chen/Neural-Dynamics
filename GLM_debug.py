@@ -20,6 +20,11 @@ import matplotlib
 matplotlib.rc('xtick', labelsize=20) 
 matplotlib.rc('ytick', labelsize=20) 
 
+
+from pyglmnet import GLM, simulate_glm
+from pyglmnet import GLMCV
+from pyglmnet import GLM
+
 #%matplotlib qt5
 
 # %% functions
@@ -178,7 +183,7 @@ ks = np.random.randn(nb)
 pad = 30
 K = kernel(ks,pad)[:,None]
 spk = NL(np.convolve(stim[:,0],K[:,0],'same'))[:,None]
-X = build_matrix(stim,spk,pad,0)
+X = build_matrix(stim,spk,pad,0)[:,1:]
 spk = NL(X @ K)
 
 plt.figure()
@@ -188,7 +193,7 @@ plt.subplot(122)
 plt.plot(spk)
 
 # %% inference
-X = build_matrix(stim,spk,pad,0)
+X = build_matrix(stim,spk,pad,0)[:,1:]
 npars = nb
 theta0 = 1*np.random.randn(npars)  #np.ones(npars) #ks + 
 res = sp.optimize.minimize( neglog, theta0, args=(spk, X, pad, nb), method='Nelder-Mead',options={'disp':True,'maxiter':1000})#, method="L-BFGS-B", tol=1e-10)#, options={'disp':True,'gtol':1e-2})
@@ -204,8 +209,6 @@ plt.plot(kernel(theta0,pad),'--')
 ###############################################################################
 ###############################################################################
 # %% test pyGLM
-from pyglmnet import GLMCV
-
 ### This is super-easy if we rely on built-in GLM fitting code
 glm = GLMCV(distr="binomial", tol=1e-3,
             score_metric="pseudo_R2",
@@ -226,7 +229,7 @@ plt.plot(K/np.linalg.norm(K),'--')
 ###convolve with basis first??
 N = 2
 dt = 0.1  #ms
-T = 3000
+T = 10000
 time = np.arange(0,T,dt)
 lt = len(time)
 
@@ -237,15 +240,15 @@ syn[:,0] = np.random.rand(N)
 rate = np.zeros_like(x)  #spike rate
 x[:,0] = np.random.randn(N)*1
 #J = np.random.randn(N,N)
-J = np.array([[1.5, -.5],\
-              [-1.5, 1.]])
+J = np.array([[2.1, -1.5],\
+              [-1.5, 1.5]])
 #J = np.array([[1, -0],\
 #          [-0, 1.]])
-J = J.T*5
+J = J.T*5.
 noise = 0.
-stim = np.random.randn(lt)*20  #np.random.randn(N,lt)*20.
+stim = np.random.randn(lt)*20-0.  #np.random.randn(N,lt)*20.
 taum = 2  #5 ms
-taus = 50  #50 ms
+taus = 5  #50 ms
 E = 1
 
 eps = 10**-15
@@ -271,7 +274,7 @@ for tt in range(0,lt-1):
     x[:,tt+1] = x[:,tt] + dt/taum*( -x[:,tt] + (np.matmul(J,LN(syn[:,tt]*x[:,tt]))) + stim[tt]*np.array([1,1]) + noise*np.random.randn(N)*np.sqrt(dt))
     spk[:,tt+1] = spiking(LN(x[:,tt+1]),dt)
     rate[:,tt+1] = LN(x[:,tt+1])
-    syn[:,tt+1] = 1#syn[:,tt] + dt*( (1-syn[:,tt])/taus - syn[:,tt]*E*spk[:,tt] )
+    syn[:,tt+1] = 1 #syn[:,tt] + dt*( (1-syn[:,tt])/taus - syn[:,tt]*E*rate[:,tt] )
     
 plt.figure()
 plt.subplot(411)
@@ -285,17 +288,21 @@ plt.subplot(414)
 plt.plot(time,stim.T);
 plt.xlim([0,time[-1]])
 
+plt.figure()
+plt.plot(rate[0,:])
 # %% raw points
 pad = 50
 X = build_matrix(stim[:,None], spk.T, pad, 1)
-glm = GLMCV(distr="binomial", tol=1e-5,
-            score_metric="pseudo_R2",
-            alpha=0., learning_rate=0.1, max_iter=100, cv=3, verbose=True)
-glm.fit(X, np.squeeze(spk[0,:]))
+glm = GLMCV(distr="poisson", tol=1e-5, eta=2.0,
+            score_metric="deviance",
+            alpha=0., learning_rate=0.01, max_iter=1000, cv=3, verbose=True)
+glm.fit(X, np.squeeze(rate[0,:]))
 
 # %%
-yhat = simulate_glm('binomial', glm.beta0_, glm.beta_, X)
+yhat = simulate_glm('poisson', glm.beta0_, glm.beta_, X)
+plt.plot(rate[0,:],'--')
 plt.plot(yhat)
+
 
 # %%
 #reg_lambda = np.logspace(np.log(1e-6), np.log(1e-8), 100, base=np.exp(1))
@@ -310,25 +317,35 @@ plt.plot(yhat)
 pad = 100  #window for kernel
 nbasis = 7  #number of basis
 couple = 1
-Y = np.squeeze(spk[0,:])  #spike train of interest
+Y = np.squeeze(rate[0,:])  #spike train of interest
 #Ks = basis_function1(pad, nbasis).T  #basis function for projection
 Ks = (np.fliplr(basis_function1(pad,nbasis).T).T).T
 stimulus = stim[:,None]
-X = build_convolved_matrix(stimulus, spk.T, Ks, couple)
-glm = GLMCV(distr="binomial", tol=1e-8,
-            score_metric="pseudo_R2",
-            alpha=0., learning_rate=0.001, max_iter=100, cv=3, verbose=True)
+X = build_convolved_matrix(stimulus, rate.T, Ks, couple)
+#glm = GLMCV(distr="poisson", tol=1e-5,
+#            score_metric="pseudo_R2",
+#            alpha=0., learning_rate=0.01, max_iter=1000, cv=3, verbose=True)
+glm = GLMCV(distr="binomial", tol=1e-5, eta=1.0,
+            score_metric="deviance",
+            alpha=0., learning_rate=1e-6, max_iter=1000, cv=3, verbose=True)  #important to have v slow learning_rate
 glm.fit(X, Y)
 
 
 # %% direct simulation
 yhat = simulate_glm('binomial', glm.beta0_, glm.beta_, X)
 plt.figure()
-plt.subplot(211)
-plt.plot(yhat)
-plt.subplot(212)
-plt.plot(spiking(LN(yhat),dt))
-plt.plot(Y*0.5,'--')
+#plt.subplot(211)
+#plt.plot(yhat)
+#plt.subplot(212)
+plt.plot(yhat)#(spiking(LN(yhat),dt))
+plt.plot(Y*1.,'--')
+
+plt.figure()
+Y_bin = Y.copy()
+Y_bin[Y>1] = 1
+yhat_bin = yhat.copy()
+yhat_bin[yhat_bin<1] = 0
+plt.imshow(np.concatenate((Y_bin[:,None], yhat_bin[:,None]), axis=1).T, aspect='auto')
 
 # %% unpacking basis
 theta = glm.beta_
@@ -351,8 +368,41 @@ spk_rec = spiking(LN(conv_+dc_-0),dt)
 
 plt.figure()
 plt.plot(Y)
-plt.plot(spk_rec-1,'--')
+plt.plot(spk_rec,'--')
 
+plt.figure()
+plt.imshow(np.concatenate((Y_bin[:,None], spk_rec[:,None]), axis=1).T, aspect='auto')
+
+# %% pyGLMnet example
+n_samples, n_features = 1000, 100
+distr = 'poisson'
+
+# random sparse regressors
+beta0 = np.random.rand()
+beta = sp.sparse.random(1, n_features, density=0.2).toarray()[0]
+# simulate data
+Xtrain = np.random.normal(0.0, 1.0, [n_samples, n_features])
+ytrain = simulate_glm('poisson', beta0, beta, Xtrain)
+Xtest = np.random.normal(0.0, 1.0, [n_samples, n_features])
+ytest = simulate_glm('poisson', beta0, beta, Xtest)
+
+# create an instance of the GLM class
+glm = GLM(distr='poisson')
+
+# fit the model on the training data
+glm.fit(Xtrain, ytrain)
+
+# predict using fitted model on the test data
+yhat = glm.predict(Xtest)
+
+plt.figure()
+plt.plot(ytest)
+plt.plot(yhat)
+
+# %%
+###############################################################################
+# Ground truth with kernel-circuit, then infer the kernels
+###############################################################################
 # %%
 ### GLM network simulation
 def GLM_net(allK, dcs, S):
@@ -369,33 +419,104 @@ def GLM_net(allK, dcs, S):
     
     for tt in range(h,T):
         ut = np.einsum('ij,ij->i', S[:,tt-h:tt], (K_stim)) + \
-             np.einsum('ijk,ik->i',  (K_couple), spks[:,tt-h:tt])  #neat way for linear dynamics
+             np.einsum('ijk,jk->i',  (K_couple), spks[:,tt-h:tt])  #neat way for linear dynamics
         ut = LN(ut + dcs)  #share the same nonlinearity for now
-        #ut = spiking(LN(us[:,tt]+dcs),dt)
         us[:,tt] = ut #np.random.poisson(ut)
-        spks[:,tt] = spiking(us[:,tt],dt)
+        spks[:,tt] = spiking(LN(ut + dcs), dt)  #Bernouli process for spiking
     return us, spks
 
+# %% ground truth GLM-net
+N = 3
+T = 10000
+dt = 0.1
+time = np.arange(0,T,dt)
+stim = np.random.randn(len(time))
+stimulus = np.repeat(stim[:,None],3,axis=1).T #identical stimulus for all three neurons for now
+nbasis = 7
+pad = 100
+nkernels = N**2+N  #xN coupling and N stimulus filters
+thetas = np.random.randn(nkernels, nbasis)  #weights on kernels
+#Ks = basis_function1(pad, nbasis)
+Ks = (np.fliplr(basis_function1(pad,nbasis).T).T).T
+allK = np.zeros((nkernels,pad))  #number of kernels x length of time window
+for ii in range(nkernels):
+    allK[ii,:] = np.dot(thetas[ii,:], Ks)
+allK = allK.reshape(N,N+1,pad)
+us, spks = GLM_net(allK, 0, stimulus)
+
+plt.figure()
+plt.imshow(us,aspect='auto')
+
+# %% inference
+nneuron = 0
+couple = 1
+Y = us[nneuron,:]  #spike train of interest
+X_bas = build_convolved_matrix(stim[:,None], spks.T, Ks, couple)  #kernel projected to basis functions
+#X_raw = build_matrix(stim[:,None], spks.T, pad, 1)  #directly fitting the whole kernel (with regulaization in GLM)
+glm = GLMCV(distr="poisson", tol=1e-5,
+            score_metric="deviance",
+            alpha=0., learning_rate=0.01, max_iter=1000, cv=3, verbose=True)
+glm.fit(X_bas, Y)
+
+# %% direct simulation
+yhat = simulate_glm('poisson', glm.beta0_, glm.beta_, X_bas)
+plt.figure()
+#plt.subplot(211)
+plt.plot(Y*1.,'--')
+plt.plot(yhat)
+#plt.subplot(212)
+#plt.plot(Y,'--')
+#plt.plot(spiking(yhat/dt,dt)*0.5) #(us[nneuron,:])#
+
+# %%reconstruct kernel
+theta_rec = glm.beta_[1:]
+theta_rec = theta_rec.reshape(N+1,nbasis)
+K_rec = np.zeros((N+1,pad))
+for ii in range(N+1):
+    K_rec[ii,:] = np.dot(theta_rec[ii,:], Ks)
+###normalize kernels
+K_rec_norm = np.array([K_rec[ii,:]/np.linalg.norm(K_rec[ii,:]) for ii in range(N+1)])
+K_tru_norm = np.array([allK[nneuron,ii,:]/np.linalg.norm(allK[nneuron,ii,:]) for ii in range(N+1)])
+plt.figure()
+plt.subplot(211)
+plt.plot(K_rec_norm.T)
+plt.subplot(212)
+plt.plot(K_tru_norm.T)
+
+plt.figure()
+plt.plot(K_rec_norm.T)
+plt.plot(K_tru_norm.T,'--')
+
 # %%
-#from pyglmnet import GLM, simulate_glm
-#
-#n_samples, n_features = 1000, 100
-#distr = 'poisson'
-#
-## random sparse regressors
-#beta0 = np.random.rand()
-#beta = sp.sparse.random(1, n_features, density=0.2).toarray()[0]
-## simulate data
-#Xtrain = np.random.normal(0.0, 1.0, [n_samples, n_features])
-#ytrain = simulate_glm('poisson', beta0, beta, Xtrain)
-#Xtest = np.random.normal(0.0, 1.0, [n_samples, n_features])
-#ytest = simulate_glm('poisson', beta0, beta, Xtest)
-#
-## create an instance of the GLM class
-#glm = GLM(distr='probit')
-#
-## fit the model on the training data
-#glm.fit(X, spk[0,:])
-#
-## predict using fitted model on the test data
-#yhat = glm.predict(X)
+# %% all-together
+allK_rec = np.zeros_like(allK)
+all_yhat = np.zeros_like(spks)
+for nn in range(N):
+    Yn = spks[nn,:]
+    X_bas_n = build_convolved_matrix(stim[:,None], spks.T, Ks, couple)
+    glm = GLMCV(distr="poisson", tol=1e-5,
+            score_metric="deviance",
+            alpha=0., learning_rate=1e-5, max_iter=1000, cv=3, verbose=True)
+    glm.fit(X_bas, Y)
+    ###store kernel
+    theta_rec_n = glm.beta_[1:]
+    theta_rec_n = theta_rec_n.reshape(N+1,nbasis)
+    for kk in range(N+1):
+        allK_rec[nn,kk,:] = np.dot(theta_rec_n[kk,:], Ks)
+    ###store prediction
+    all_yhat[nn,:] = simulate_glm('poisson', glm.beta0_, glm.beta_, X_bas_n)
+    
+# %% reconstruct output
+us_rec, spks_rec = GLM_net(allK_rec, 0, stimulus)
+plt.figure()
+plt.imshow(spks_rec,aspect='auto')
+
+# %% reconstruct kernels
+nneuron = 1
+K_rec_norm = np.array([allK_rec[nneuron,ii,:]/np.linalg.norm(allK_rec[nneuron,ii,:]) for ii in range(N+1)])
+K_tru_norm = np.array([allK[nneuron,ii,:]/np.linalg.norm(allK[nneuron,ii,:]) for ii in range(N+1)])
+plt.figure()
+plt.subplot(211)
+plt.plot(K_rec_norm.T)
+plt.subplot(212)
+plt.plot(K_tru_norm.T)
