@@ -39,8 +39,8 @@ def Syn_current(Gs,v,s):
     return Is
 
 #setup
-N = 50
-T = 1000
+N = 10
+T = 300
 dt = 0.1
 time = np.arange(0,T,dt)
 tl = len(time)
@@ -66,11 +66,13 @@ Gg[np.random.rand(N,N)>psg] = 0  #sparse
 pos = np.triu_indices(N, k=0)
 Gg[pos] = Gg.T[pos]  #symmetric
 Gs = np.random.randn(N,N)*3  #synaptic connection
+#follow Dale's rule~
+
 Gs[np.random.rand(N,N)>pss] = 0  #sparse
 
 #Stimulli
 Iext = np.zeros((N,tl))
-Iext[10,1000:1500] = np.ones(500)*100
+Iext[5,1000:1500] = np.ones(500)*100
 #Iext = np.random.randn(N,tl)*10.
 
 #neural dynamics
@@ -90,9 +92,13 @@ def NeuralNetwork(Iext):
 
 Vt, St = NeuralNetwork(Iext)
 plt.figure()
-plt.imshow(Vt,aspect='auto')
+plt.imshow(Vt,aspect='auto',extent=[0,max(time),0,N])
+plt.xlabel('time')
+plt.ylabel('neuron ID')
 plt.figure()
-plt.plot(Vt.T)
+plt.plot(time,Vt.T)
+plt.xlabel('time')
+plt.ylabel('voltage')
 
 # %% Dynamic mode decomposition and mode dependencies
 ###############################################################################
@@ -117,43 +123,67 @@ for nn in range(N):
 #    return P
 #P = Build_depend()
 plt.figure()
-plt.imshow(P,aspect='auto')
+plt.imshow(P,aspect='auto',extent=[0,N,0,N])
+plt.xlabel('neuron ID')
+plt.ylabel('neuron ID')
 
 # %% Probability graph model
 ###############################################################################
-pkl_file = open('weighted_sum.pkl', 'rb')
-data1 = pickle.load(pkl_file)
-cpt=np.reshape(data1,(279,279))
+from anytree import Node, RenderTree
+from anytree.dotexport import RenderTreeGraph
+from graphviz import Digraph
+# graphviz needs to be installed for the next line!
+import operator
+# %%
+cpt = P.copy()
+neurons_name = np.arange(0,N)
 def extend_tree(new_parent,pindex,plist,count):  
-    if (count>1):
-        count=0
+    if count>1: #line 4
+        count = 0
         return
-    
-    if new_parent==None:
+    if new_parent==None:  #line 7
         return
-    elif pindex not in plist:
+    elif pindex not in plist:  #line 9
         plist.append(pindex)
-        child_list={}
-        count=count+1
-         
-            
-        for i in range(0,279):
-            prob=cpt[pindex,i]
-            if pindex in sensory:
-                if (prob>=0.1 and i not in plist and i in inter):
-                    child_list[i]=prob
-            if pindex in inter:
-                if (prob>=0.1 and i not in plist and i in motor):
-                    child_list[i]=prob
+        child_list = {}
+        count = count+1
+        for i in range(0,N):  #line 12
+            prob = cpt[pindex,i]
+            if prob>=thresh and i not in plist:
+                child_list[i] = prob  #line 14
+#            if pindex in inter:
+#                if (prob>=0.1 and i not in plist and i in motor):
+#                    child_list[i]=prob
 
-        if child_list==None:
+        if child_list==None:  #additional check?
             return
         
         else:
-            sorted_child=sorted(child_list.items(), key=operator.itemgetter(1))
-            num=len(sorted_child)
+            sorted_child = sorted(child_list.items(), key=operator.itemgetter(1))
+            num = len(sorted_child)
             for j in range(0,min(num,num)):
-                c=sorted_child[num-j-1][0]
-                new_child=Node(neurons_name[c],parent=new_parent)
-                extend_tree(new_child,c,plist,count)
+                c = sorted_child[num-j-1][0]
+                new_child = Node(neurons_name[c], parent=new_parent)
+                extend_tree(new_child, c, plist, count)
+# %%           
+## example: PLML as the input node
+name = '_test'
+fname = 'PLML'+name+'.dot'
+count=0
+active=[]
+Input = Node("Input")
+thresh = 0.6
+
+PLML = Node("5",parent=Input)
+extend_tree(PLML, 5, active, count)
+
+
+for pre, fill, node in RenderTree(Input):
+    print("%s%s" % (pre, node.name))
+
+RenderTreeGraph(Input).to_dotfile(fname)
+
+# %% save image
+from graphviz import render
+render('dot', 'png', fname)
 

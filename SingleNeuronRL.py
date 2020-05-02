@@ -53,8 +53,8 @@ def WeightChange(r,y,x,w,pars):
         dw = rho*(r*y - Est)*x
     elif r==-1:
         dw = lam*rho*(r*y - Est)*x
-    else:
-        dw = 0
+#    else:
+#        dw = 0
     return dw
 
 def Environment(x,y,dxy):
@@ -64,18 +64,18 @@ def Environment(x,y,dxy):
     patterns = dxy.x   #list of N patterns
     probs = dxy.p  #probabilities Nx2 (for +1 and -1)
     pos = FindPattern(x, patterns)  #find the matching pattern
-    if y==1:
+    if y==+1:
         prob = probs[pos,1]
         if prob>np.random.rand():
-            rt = 1
+            rt = +1
         else:
-            rt = 0
+            rt = -1
     elif y==-1:
         prob = probs[pos,0]
         if prob>np.random.rand():
-            rt = 1
+            rt = +1
         else:
-            rt = 0
+            rt = -1
     return rt
 
 def FindPattern(x,patterns):
@@ -93,14 +93,16 @@ def FindPattern(x,patterns):
 #learning parameters
 lam = 0.01
 rho = 0.5
-T = 1
+T = 0.15
 pars = lam, rho, T
-nu = 0.01
+nu = 0.001
 #trials structures
 trials = 3000
-seqs = 100
+seqs = 200
+seq = np.random.choice(2,seqs)
 Rs = np.zeros(trials)
 #environment setting
+P = 2  #two patterns for now
 patterns = np.array([1,0]), np.array([1,1])
 Pr = np.array([[0.6, 0.9],\
                [0.4, 0.2]])
@@ -109,17 +111,62 @@ dxy.x = patterns
 dxy.p = Pr
 
 #learning
-w = np.random.randn(2)
+w = np.zeros(P)  #np.random.randn(2)
 for tt in range(trials):
     #initialize for trial
-    reward = 0
+    reward = 0  #used for reward counting
+    w_ = np.zeros(P)  #template used for batch update
     for ss in range(seqs):
-        x = patterns[np.random.choice(2)]  #randomly pick pattern
+        x = patterns[np.random.choice(P)]  #[seq[ss]]  #  #randomly pick pattern
         y = Activation(w, x, np.random.randn()*nu)  #measure activity
         rt = Environment(x, y, dxy)  #compute reward
         dw = WeightChange(rt, y, x, w, pars)  #update weights
-        w = w + dw
-        reward = reward + rt
+        w_ = w_ + dw
+        if rt>0:
+            reward = reward + rt
+    w = w + w_
     Rs[tt] = reward/seqs  #recording the probability of getting reward
+
+plt.figure()
 plt.plot(Rs)
+print(w)
+
+# %% record stochastic dynamics
+def optimal_policy(x,dxy):
+    patterns = dxy.x   #list of N patterns
+    probs = dxy.p  #probabilities Nx2 (for +1 and -1)
+    pos = FindPattern(x, patterns)  #find the matching pattern
+    opt_y = np.argmax(probs[pos,:])
+    if opt_y==0:
+        y = -1
+    elif opt_y==1:
+        y = +1
+    return y
+
+ws = np.zeros((P,trials))  #record weights
+dws = np.zeros((P,trials))  #record for forcing
+match = np.zeros(trials)  #a target and a result
+#learning
+w = np.zeros(P)  #np.random.randn(2)
+for tt in range(trials):
+    #initialize for trial
+    reward = 0  #used for reward counting
+    w_ = np.zeros(P)  #template used for batch update
+    ys = np.zeros(seqs)
+    opt_y = np.zeros(seqs)
+    for ss in range(seqs):
+        x = patterns[np.random.choice(P)]  #[seq[ss]]  #  #randomly pick pattern
+        y = Activation(w, x, np.random.randn()*nu)  #measure activity
+        rt = Environment(x, y, dxy)  #compute reward
+        dw = WeightChange(rt, y, x, w, pars)  #update weights
+        w_ = w_ + dw
+        if rt>0:
+            reward = reward + rt
+        ys[ss] = y
+        opt_y[ss] = optimal_policy(x,dxy)
+    w = w + w_
+    ws[:,tt] = w
+    dws[:,tt] = w_
+    match[tt] = np.dot(ys,opt_y)/seqs
+    Rs[tt] = reward/seqs  #recording the probability of getting reward
 
