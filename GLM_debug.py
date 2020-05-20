@@ -427,10 +427,10 @@ def GLM_net(allK, dcs, S):
 
 # %% ground truth GLM-net
 N = 3
-T = 10000
+T = 500
 dt = 0.1
 time = np.arange(0,T,dt)
-stim = np.random.randn(len(time))
+stim = np.random.randn(len(time))*0.1
 stimulus = np.repeat(stim[:,None],3,axis=1).T #identical stimulus for all three neurons for now
 nbasis = 7
 pad = 100
@@ -453,13 +453,16 @@ couple = 1
 Y = us[nneuron,:]  #spike train of interest
 X_bas = build_convolved_matrix(stim[:,None], spks.T, Ks, couple)  #kernel projected to basis functions
 #X_raw = build_matrix(stim[:,None], spks.T, pad, 1)  #directly fitting the whole kernel (with regulaization in GLM)
-glm = GLMCV(distr="poisson", tol=1e-5,
+#glm = GLMCV(distr="poisson", tol=1e-5, eta=1.0,
+#            score_metric="deviance",
+#            alpha=0., learning_rate=0.01, max_iter=1000, cv=3, verbose=True)
+glm = GLMCV(distr="binomial", tol=1e-5, eta=1.0,
             score_metric="deviance",
             alpha=0., learning_rate=0.01, max_iter=1000, cv=3, verbose=True)
 glm.fit(X_bas, Y)
 
 # %% direct simulation
-yhat = simulate_glm('poisson', glm.beta0_, glm.beta_, X_bas)
+yhat = simulate_glm('binomial', glm.beta0_, glm.beta_, X_bas)
 plt.figure()
 #plt.subplot(211)
 plt.plot(Y*1.,'--')
@@ -494,9 +497,9 @@ all_yhat = np.zeros_like(spks)
 for nn in range(N):
     Yn = spks[nn,:]
     X_bas_n = build_convolved_matrix(stim[:,None], spks.T, Ks, couple)
-    glm = GLMCV(distr="poisson", tol=1e-5,
+    glm = GLMCV(distr="binomial", tol=1e-5, eta=1.0,
             score_metric="deviance",
-            alpha=0., learning_rate=1e-5, max_iter=1000, cv=3, verbose=True)
+            alpha=0., learning_rate=0.01, max_iter=1000, cv=3, verbose=True)
     glm.fit(X_bas, Y)
     ###store kernel
     theta_rec_n = glm.beta_[1:]
@@ -504,7 +507,7 @@ for nn in range(N):
     for kk in range(N+1):
         allK_rec[nn,kk,:] = np.dot(theta_rec_n[kk,:], Ks)
     ###store prediction
-    all_yhat[nn,:] = simulate_glm('poisson', glm.beta0_, glm.beta_, X_bas_n)
+    all_yhat[nn,:] = simulate_glm('binomial', glm.beta0_, glm.beta_, X_bas_n)
     
 # %% reconstruct output
 us_rec, spks_rec = GLM_net(allK_rec, 0, stimulus)
@@ -520,3 +523,48 @@ plt.subplot(211)
 plt.plot(K_rec_norm.T)
 plt.subplot(212)
 plt.plot(K_tru_norm.T)
+
+# %% scanning data length
+def kernel_MSE(Y,S,nneuron,Ks):
+    """
+    Compute MSE from the GLM results, with simulated activity, stimulus, and the ground truth kernel
+    """
+    ###GLM
+    y = np.squeeze(Y[nneuron,:])  #spike train of interest
+    stimulus = S[:,None]  #same stimulus for all neurons
+    X = build_convolved_matrix(stimulus, Y.T, Ks, couple)  #design matrix with features projected onto basis functions
+    glm = GLMCV(distr="binomial", tol=1e-5, eta=1.0,
+            score_metric="deviance",
+            alpha=0., learning_rate=0.01, max_iter=1000, cv=3, verbose=True)  #important to have v slow learning_rate
+    glm.fit(X, y)
+    
+    ###store kernel
+    theta_rec = glm.beta_[1:]
+    theta_rec = theta_rec.reshape(N+1,nbasis)
+    K_rec = np.zeros((N+1,pad))
+    for ii in range(N+1):
+        K_rec[ii,:] = np.dot(theta_rec[ii,:], Ks)
+    
+    ###normalize kernels
+    K_rec_norm = np.array([K_rec[ii,:]/np.linalg.norm(K_rec[ii,:]) for ii in range(N+1)])  #
+    K_tru_norm = np.array([allK[nneuron,ii,:]/np.linalg.norm(allK[nneuron,ii,:]) for ii in range(N+1)])  #
+    mses = np.sum((K_rec_norm-K_tru_norm)**2,axis=1)  #measuring MSE for each kernel
+    return mses
+
+lts = np.array([500,1000,2000,5000,10000,20000])
+MSEs = np.zeros((N,N+1,len(lts)))  #MSE for all Nx(N+1) kernels
+stim = np.random.randn(len(time))*0.1
+stimulus = np.repeat(stim[:,None],3,axis=1).T #identical stimulus for all three neurons for now
+us, spks = GLM_net(allK, 0, stimulus)  #total simulation of activity
+for nn in range(N):
+    for ti,tt in enumerate(lts):
+#        Y, S = kernel_MSE(tt)
+        MSEs[nn,:,ti] = kernel_MSE(us[:,:tt], stim[:tt], nn, Ks)
+
+# %%
+plt.figure()
+for ii in range(N):
+    normed_mse = MSEs[ii,:,0]
+    plt.plot(lts[:],MSEs[ii,:,:].T/normed_mse,'-o')
+plt.xlabel('length of simulation')
+plt.ylabel('normalized MSE')

@@ -135,7 +135,8 @@ from graphviz import Digraph
 # graphviz needs to be installed for the next line!
 import operator
 # %%
-cpt = P.copy()
+#cpt = P.copy()  #functional
+cpt = np.abs(Gg)/np.sum(np.abs(Gg),axis=1)  #structural
 neurons_name = np.arange(0,N)
 def extend_tree(new_parent,pindex,plist,count):  
     if count>1: #line 4
@@ -167,12 +168,12 @@ def extend_tree(new_parent,pindex,plist,count):
                 extend_tree(new_child, c, plist, count)
 # %%           
 ## example: PLML as the input node
-name = '_test'
-fname = 'PLML'+name+'.dot'
+name = '_structural'
+fname = 'PLML'+name
 count=0
 active=[]
 Input = Node("Input")
-thresh = 0.6
+thresh = 0.01
 
 PLML = Node("5",parent=Input)
 extend_tree(PLML, 5, active, count)
