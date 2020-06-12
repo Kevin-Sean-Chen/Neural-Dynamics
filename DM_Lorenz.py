@@ -31,9 +31,10 @@ def Lorenz_model(T,dt):
     """
     Samples with ran length T and time step dt
     """
-    Xt = np.zeros((int(T/dt),3))
+    lt = int(T/dt)
+    Xt = np.zeros((lt,3))
     Xt[0,:] = np.random.randn(3)*10  #initial condition within the dynamic range
-    for tt in range(T-1):
+    for tt in range(lt-1):
         dx,dy,dz = Lorenz_dt(Xt[tt,:], dt)
         Xt[tt+1,:] = Xt[tt,:]+[dx,dy,dz]
     return Xt
@@ -51,9 +52,10 @@ def Delay_embedding(X,K):
     """
     T = X.shape[0]
     d = X.shape[1]
+    ut = 50  #size of time blocks
     Y = []  #np.zeros((T-K+1, K*d))
     for kk in range(0,K):
-        Y.append(X[K-kk:T-kk,0:d])
+        Y.append(X[(K-kk)*ut:T-kk*ut,0:d])
     return np.concatenate(Y,axis=1)
 
 def Mode_decomp(Y,m):
@@ -102,8 +104,9 @@ def min_MSE(Xt,Xtt,theta):
     phi = phi/np.sum(phi)
     w = np.linalg.pinv(phi.T @ phi) @ phi.T @ Xtt
     return w
+
 # %% analysis
-T = 1000
+T = 200
 dt = 0.01
 Es = np.zeros((40,8))
 for kk in range(0,40):
@@ -113,4 +116,4 @@ for kk in range(0,40):
         Y_ = Mode_decomp(Y,mm+1)
         Es[kk,mm] = NN_prediction(Y,Y_,0)
 
-    
+

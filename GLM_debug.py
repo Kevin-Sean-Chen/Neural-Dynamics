@@ -427,7 +427,7 @@ def GLM_net(allK, dcs, S):
 
 # %% ground truth GLM-net
 N = 3
-T = 500
+T = 1000
 dt = 0.1
 time = np.arange(0,T,dt)
 stim = np.random.randn(len(time))*0.1
@@ -458,7 +458,7 @@ X_bas = build_convolved_matrix(stim[:,None], spks.T, Ks, couple)  #kernel projec
 #            alpha=0., learning_rate=0.01, max_iter=1000, cv=3, verbose=True)
 glm = GLMCV(distr="binomial", tol=1e-5, eta=1.0,
             score_metric="deviance",
-            alpha=0., learning_rate=0.01, max_iter=1000, cv=3, verbose=True)
+            alpha=0., learning_rate=0.1, max_iter=1000, cv=3, verbose=True)
 glm.fit(X_bas, Y)
 
 # %% direct simulation
@@ -489,7 +489,7 @@ plt.plot(K_tru_norm.T)
 plt.figure()
 plt.plot(K_rec_norm.T)
 plt.plot(K_tru_norm.T,'--')
-
+### array([0.05591984, 0.02842407, 0.00187494, 0.07887918])
 # %%
 # %% all-together
 allK_rec = np.zeros_like(allK)
@@ -535,19 +535,21 @@ def kernel_MSE(Y,S,nneuron,Ks):
     X = build_convolved_matrix(stimulus, Y.T, Ks, couple)  #design matrix with features projected onto basis functions
     glm = GLMCV(distr="binomial", tol=1e-5, eta=1.0,
             score_metric="deviance",
-            alpha=0., learning_rate=0.01, max_iter=1000, cv=3, verbose=True)  #important to have v slow learning_rate
+            alpha=0., learning_rate=0.1, max_iter=1000, cv=3, verbose=True)  #important to have v slow learning_rate
     glm.fit(X, y)
     
     ###store kernel
     theta_rec = glm.beta_[1:]
-    theta_rec = theta_rec.reshape(N+1,nbasis)
+    theta_rec = theta_rec.reshape(nbasis,N+1)
     K_rec = np.zeros((N+1,pad))
     for ii in range(N+1):
-        K_rec[ii,:] = np.dot(theta_rec[ii,:], Ks)
+        K_rec[ii,:] = np.dot(theta_rec[:,ii], Ks)
     
-    ###normalize kernels
+    ###normalize and shift kernels
     K_rec_norm = np.array([K_rec[ii,:]/np.linalg.norm(K_rec[ii,:]) for ii in range(N+1)])  #
     K_tru_norm = np.array([allK[nneuron,ii,:]/np.linalg.norm(allK[nneuron,ii,:]) for ii in range(N+1)])  #
+#    K_rec_norm = K_rec_norm.T-K_rec_norm[:,-1]
+#    K_tru_norm = K_tru_norm.T-K_tru_norm[:,-1]
     mses = np.sum((K_rec_norm-K_tru_norm)**2,axis=1)  #measuring MSE for each kernel
     return mses
 
@@ -564,7 +566,7 @@ for nn in range(N):
 # %%
 plt.figure()
 for ii in range(N):
-    normed_mse = MSEs[ii,:,0]
-    plt.plot(lts[:],MSEs[ii,:,:].T/normed_mse,'-o')
+    normed_mse = MSEs[ii,:,0]  #np.max(MSEs[ii,:,:],axis=1)
+    plt.plot((lts[:]),MSEs[ii,ii+1,:].T,'-o')
 plt.xlabel('length of simulation')
-plt.ylabel('normalized MSE')
+plt.ylabel('MSE')
