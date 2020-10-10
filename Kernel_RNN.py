@@ -9,6 +9,7 @@ import numpy as np
 import scipy as sp
 import matplotlib.pyplot as plt
 import dotmap as DotMap
+import itertools
 
 import seaborn as sns
 color_names = ["windows blue", "red", "amber", "faded green"]
@@ -19,6 +20,10 @@ sns.set_context("talk")
 import matplotlib 
 matplotlib.rc('xtick', labelsize=20) 
 matplotlib.rc('ytick', labelsize=20) 
+
+import matplotlib as mpl
+mpl.rcParams['text.usetex']=True
+mpl.rcParams['text.latex.unicode']=True
 
 #%matplotlib qt5
 
@@ -107,12 +112,15 @@ plt.scatter(np.real(lamb),np.imag(lamb))
 ###############################################################################
 # %% neural network settings
 nneuron = 6
-T = 10000  #length of simulation
+T = 50000  #length of simulation
 Ws = np.zeros((nneuron,nneuron))  #weights
 v1 = np.array([1,0,1,0,1,0])#np.random.randn(nneuron)
 v2 = np.array([0,1,0,1,0,1])#
 vw = np.random.randn(nbasis)
-ww = np.outer(v1,v1)*0.5 + np.outer(v2,v2)*0.5 + np.random.randn(nneuron,nneuron)*.01  #low-rank structure
+bias1 = 0.1  #biased towards pattern1
+rr = 5  #reccurent strength
+bb = 0.05  #input strenght
+ww = rr*(np.outer(v1,v1)*(bias1) + np.outer(v2,v2)*(1-bias1)) + np.random.randn(nneuron,nneuron)*.01  #low-rank structure
 
 us = np.random.randn(nneuron,T)*0.01
 rt = np.zeros_like(us)
@@ -121,9 +129,12 @@ dt = 0.01
 # %% neural dynamics
 for tt in range(pad,T-1):
     rt[:,tt] = NL(ww @ us[:,tt])
-    us[:,tt+1] = us[:,tt] + dt*(-us[:,tt] + rt[:,tt]) + np.random.randn(nneuron)*.5
+    us[:,tt+1] = us[:,tt] + dt*(-us[:,tt] + rt[:,tt]) + v2*bb + np.random.randn(nneuron)*1.
 plt.figure()
 plt.imshow(rt,aspect='auto')
+plt.colorbar()
+plt.xlabel('time steps')
+plt.ylabel('cell')
 
 # %% auto-corr
 def autocorrelation (x) :
@@ -141,3 +152,94 @@ plt.figure()
 plt.plot(autocorrelation(rt[1,:])[:5000])
 
 # %% Dwell-time calculation!
+import ssm
+# %% based on HMM
+obs = rt[:4,:].T
+obs_dims = obs.shape[1]
+N_iters = 50
+num_states = 2  #assuming transition between two patterns
+hmm = ssm.HMM(num_states, obs_dims, num_iters='gaussian')
+hmm_lls = hmm.fit(obs, method='em',num_iters=N_iters)
+
+# %%
+plt.figure()
+plt.plot(hmm_lls)
+most_lls = hmm.most_likely_states(obs)
+plt.figure()
+plt.subplot(211)
+plt.plot(most_lls)
+plt.xlim([0,len(most_lls)])
+plt.subplot(212)
+plt.imshow(obs.T,aspect='auto')
+
+learned_transition_mat = hmm.transitions.transition_matrix
+print(learned_transition_mat)
+
+# %% MLE-based $$$
+
+# %% based on ML/corr
+ML = np.zeros((2,T))
+for tt in range(0,T):
+    ML[0,tt], ML[1,tt] = np.dot(v1,rt[:,tt]), np.dot(v2,rt[:,tt])
+    
+# %% based on HMM
+obs = ML.T #ML[1,:][None,:].T #
+obs_dims = obs.shape[1]
+N_iters = 100
+num_states = 2  #assuming transition between two patterns
+hmm = ssm.HMM(num_states, obs_dims, num_iters='gaussian')
+hmm_lls = hmm.fit(obs, method='em',num_iters=N_iters)
+
+# %%
+plt.figure()
+plt.plot(hmm_lls)
+most_lls = hmm.most_likely_states(obs)
+plt.figure()
+plt.plot(most_lls)
+
+learned_transition_mat = hmm.transitions.transition_matrix
+print(learned_transition_mat)
+print(np.log(learned_transition_mat[0,1]/learned_transition_mat[1,0]))
+
+# %%
+plt.figure()
+plt.subplot(211)
+plt.plot(ML[0,:])
+plt.xlim([0,len(most_lls)])
+plt.ylabel('correlation')
+plt.subplot(212)
+plt.plot(most_lls)
+plt.xlim([0,len(most_lls)])
+plt.ylabel('state assigned')
+plt.xlabel('time steps')
+
+# %% dwell time
+difs = np.diff(most_lls)
+pos = np.where(difs==1)[0]
+durs = np.diff(pos)
+plt.hist(durs,50)
+pos = np.where(difs==-1)[0]
+durs = np.diff(pos)
+plt.hist(durs,50,alpha=0.5)
+
+# %% enumerating free energy
+U = 0
+kbT = 1
+spins = list(itertools.product([-1, 1], repeat=nneuron))
+Esf = np.zeros(len(spins))
+Psf = np.zeros(len(Esf))
+Esi = np.zeros(len(spins))
+Psi = np.zeros(len(Esi))
+for ii in range(len(spins)):
+    vv = np.array(spins[ii])
+    Esf[ii] = -0.5* vv @ ww @ vv - 0*v2 @ vv +0* np.ones(nneuron)*U @ vv
+    Psf[ii] = np.exp(-1/kbT*Esf[ii])
+    Esi[ii] = -0.5* vv @ ww @ vv - bb*v2 @ vv + 0*np.ones(nneuron)*U @ vv
+    Psi[ii] = np.exp(-1/kbT*Esi[ii])
+
+# computing free-energy
+Zf = sum(Psf)
+Psf = Psf/Zf
+Zi = sum(Psi)
+Psi = Psi/Zi
+print(-kbT*np.log(Zf)+kbT*np.log(Zi))

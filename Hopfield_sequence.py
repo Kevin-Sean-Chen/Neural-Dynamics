@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import itertools
 from scipy.stats import norm
 from scipy import stats
+from sklearn.linear_model import LinearRegression
 
 import seaborn as sns
 color_names = ["windows blue", "red", "amber", "faded green"]
@@ -19,8 +20,13 @@ sns.set_style("white")
 sns.set_context("talk")
 
 import matplotlib 
-matplotlib.rc('xtick', labelsize=20) 
-matplotlib.rc('ytick', labelsize=20) 
+matplotlib.rc('xtick', labelsize=30) 
+matplotlib.rc('ytick', labelsize=30) 
+
+import matplotlib as mpl
+mpl.rcParams['text.usetex']=True
+mpl.rcParams['text.latex.unicode']=True
+
 
 # %% Boltzmann machine
 N = 10  #network size
@@ -90,13 +96,13 @@ Vf = np.random.randint(0,2,N)
 Vf[Vf==0] = -1
 #Vf = -Vi
 #weights
-weighted = 0.3
+weighted = 0.1
 W = 1.*((1-weighted)*np.outer(Vi,Vi) + weighted*np.outer(Vf,Vf)) + np.random.randn(N,N)*.5
 #W = W-np.diag(W)
 
 # %% dynamics
 #trials
-rep = 5000
+rep = 10000
 max_it = 1000
 # physical
 kbT = 15  #temperature
@@ -174,7 +180,7 @@ plt.ylabel('$P_f(W)$')
 plt.figure()
 #mean,std = norm.fit(wf)
 ae, loce, scalee = stats.skewnorm.fit(wf)
-plt.hist(wf, bins=100, normed=True)
+plt.hist(wf, bins=100, normed=True, label='$P_f(W)$')
 xmin, xmax = plt.xlim()
 x = np.linspace(xmin, xmax, 100)
 #y = norm.pdf(x, mean, std)
@@ -182,24 +188,49 @@ y = stats.skewnorm.pdf(x , ae, loce, scalee)
 plt.plot(x, y, 'b')
 #mean,std = norm.fit(wr)
 ae, loce, scalee = stats.skewnorm.fit(wr)
-plt.hist(wr, bins=100, normed=True, alpha=0.5)
+plt.hist(wr, bins=100, normed=True, alpha=0.5, label='$P_r(-W)$')
 xmin, xmax = plt.xlim()
 x = np.linspace(xmin, xmax, 100)
 #y = norm.pdf(x, mean, std)
 y = stats.skewnorm.pdf(x , ae, loce, scalee)
 plt.plot(x, y, 'r')
+plt.xlabel('$W$')
+plt.ylabel('$P_f(W), P_r(-W)$')
+plt.legend()
 
 # %% CFT plot 2
 xm,xM = min(np.hstack([wf,wr])),max(np.hstack([wf,wr]))
-com_bin = np.arange(xm,xM,0.1)
+com_bin = np.arange(xm,xM,0.05)
 plt.figure()
 nwf,_= np.histogram(wf,bins=com_bin,normed=True)
 nwr,_= np.histogram(wr,bins=com_bin,normed=True)
-plt.plot(com_bin[:-1], np.log(nwf/nwr),'-')
-plt.hlines(0,-.5,1.5,linestyle='dashed')
+y_x = np.log(nwf/nwr)
+plt.plot(com_bin[:-1], y_x,'-')
+plt.hlines(0,-.5,2.5,linestyle='dashed')
 #plt.plot(np.cumsum(nwr))
 plt.xlabel('$W$')
 plt.ylabel('$log(P_f(W)/P_r(-W))$')
+
+# %% regression
+xs = com_bin[:-1]
+pos_inf = np.where(np.isinf(y_x)==False)[0]
+ys = y_x[pos_inf]
+xs = xs[pos_inf]
+pos_real = np.where(np.isnan(ys)==False)[0]
+ys = ys[pos_real]
+xs = xs[pos_real]
+reg = LinearRegression().fit(xs[2:-2].reshape(-1, 1), ys[2:-2].reshape(-1, 1))
+pred_dF = -reg.intercept_/reg.coef_ #reg.predict(np.array([0]).reshape(-1,1))
+print(pred_dF)
+y_ = reg.predict(xs.reshape(-1,1))
+plt.figure()
+plt.plot(xs, ys,'o',label='data')
+plt.hlines(0,-.5,1.5,linestyle='dashed',label='$y=0$')
+plt.plot(xs,y_,'-',label='fitting')
+#plt.plot(np.cumsum(nwr))
+plt.xlabel('$W$',fontsize=30)
+plt.ylabel('$log(P_f(W)/P_r(-W))$',fontsize=30)
+plt.legend(fontsize=25)
 
 # %% Free energy calculation
 def entropy(v):
@@ -270,7 +301,7 @@ Zf = sum(Psf)
 Psf = Psf/Zf
 Zi = sum(Psi)
 Psi = Psi/Zi
-print(-kbT*np.log(Zf)+kbT*np.log(Zi))
+print((-kbT*np.log(Zf)+kbT*np.log(Zi)))
 #Free = np.dot(Ps,Es) - kbT*(-np.dot(Ps, np.log(Ps)))
 #print(Free)
 
@@ -332,3 +363,47 @@ aa,bb = np.histogram(Qs,bins,density=True)
 plt.plot(bb[-50:-1],(np.log(aa[-49:]/np.flip(aa[2:51]))))
 plt.xlabel('$\Delta Q$')
 plt.ylabel('$log(P(\Delta Q)/P(-\Delta Q))$')
+
+
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %% Bennett method
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %% BAR functions
+def fx(W, x, kbT):
+    """
+    Bennett's optimal function
+    """
+    #func = np.exp(x/(2*kbT)) / (1+np.exp((x-W)/kbT))  #(Science...2008)
+    func = 1/(1+1*np.exp(1/kbT*(W-x)))  #minimizes variance (PRE, 2020)
+    return func
+
+def zs(x, wbin, wf, wr, kbT):
+    """
+    difference of z function, where z functions are the function of x in BAR method
+    """
+    zfs = np.array([fx(ww,x,kbT)*np.exp(-1/kbT*ww) for ww in wbin])
+    zf = np.log(np.dot(zfs,wf))
+    zrs = np.array([fx(ww,x,kbT) for ww in wbin])
+    zr = np.log(np.dot(zrs,wr))
+    dF = (zr-zf)/np.sum(wr)  #in units of kbT
+    return dF
+
+# %%
+wr_ = wr.copy()  #not taking negative value
+xx = np.linspace(-.1,2,50)
+xm,xM = min(np.hstack([wf,wr_])),max(np.hstack([wf,wr_]))
+com_bin = np.arange(xm,xM,0.1)
+dFs_BAR = np.zeros(len(xx))
+pwf,_= np.histogram(wf,bins=com_bin,density=True)
+pwr,_= np.histogram(wr_,bins=com_bin,density=True)
+#pwf, pwr = pwf/np.sum(pwf), pwr/np.sum(pwr)
+for ii,xi in enumerate(xx):
+    dFs_BAR[ii] = zs(xi, com_bin[:-1], pwf, pwr, kbT)
+
+# %%
+plt.figure()
+plt.plot(xx,dFs_BAR,'-o',label='$y=z_R(x)-z_F(x)$')
+plt.plot(xx,xx,'--',label='$y=x$')
+plt.legend(fontsize=25)
+plt.xlabel('$x$',fontsize=30)
+plt.ylabel('$y(x)$',fontsize=30)
