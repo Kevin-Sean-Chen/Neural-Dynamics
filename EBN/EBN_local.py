@@ -190,7 +190,7 @@ Fm = 0
 #stimuli
 ct = np.zeros((input_dim,lt))  #command input time series
 ct[:,1000:3000] = np.random.randn(1,2000)*1.
-Xs = Target_dynamics(ct, dt, '3D')*0.1  #target dynamics
+Xs = Target_dynamics(ct, dt, '1D')*0.1  #target dynamics
 
 #biophysics
 lamb_u = 20  #spiking time scale (0.1)

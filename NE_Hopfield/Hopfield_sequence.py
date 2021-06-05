@@ -96,13 +96,14 @@ Vf = np.random.randint(0,2,N)
 Vf[Vf==0] = -1
 #Vf = -Vi
 #weights
-weighted = 0.1
-W = 1.*((1-weighted)*np.outer(Vi,Vi) + weighted*np.outer(Vf,Vf)) + np.random.randn(N,N)*.5
-#W = W-np.diag(W)
+weighted = 0.2
+W = 1.*((1-weighted)*np.outer(Vi,Vi) + weighted*np.outer(Vf,Vf)) + np.random.randn(N,N)*.5  #two-state setup
+W = 1.*((1-weighted)*np.outer(Vi,Vi) + weighted*np.outer(Vf,Vf)) + np.outer(Vi,Vf)*.9  #with weighted sequential step
+W = W-np.diag(W)
 
 # %% dynamics
 #trials
-rep = 10000
+rep = 5000
 max_it = 1000
 # physical
 kbT = 15  #temperature
@@ -225,7 +226,7 @@ print(pred_dF)
 y_ = reg.predict(xs.reshape(-1,1))
 plt.figure()
 plt.plot(xs, ys,'o',label='data')
-plt.hlines(0,-.5,1.5,linestyle='dashed',label='$y=0$')
+plt.hlines(0,-.75,1.0,linestyle='dashed',label='$y=0$')
 plt.plot(xs,y_,'-',label='fitting')
 #plt.plot(np.cumsum(nwr))
 plt.xlabel('$W$',fontsize=30)
@@ -309,10 +310,14 @@ Fj = (-kbT)*np.log(np.mean(np.exp((-1/kbT)*wf)))  # via Jarzynski's work relatio
 print(Fj)
 
 # %% CFT plot 2
+F_tr = np.array([0.1518, 1.61, 1.39, 0.824, 0.522, 0.279, 0.071, 1.08, 1.176, 0.5, 0.6748, 0.4714, 0.2168, 0.076, 0.097])
+F_CFT = np.array([0.1599, 1.701, 1.65, 0.781, 0.5461, 0.236, 0.073, 1.19, 1.34, 0.55, 0.6275, 0.3619, 0.2182, 0.0269, 0.05])
 plt.figure()
-plt.plot(F_tr,F_CFT,'o')
-plt.xlabel('Numerical $\Delta F$')
-plt.ylabel('$CFT \Delta F$')
+plt.plot(F_tr,F_CFT,'o',markersize=15)
+xx = np.arange(min(F_tr),max(F_tr),0.01)
+plt.plot(xx,xx,'--')
+plt.xlabel('$\Delta F$ (numerical)',fontsize=30)
+plt.ylabel('$\Delta F=W^*$ (CFT)',fontsize=30)
 
 
 # %%
