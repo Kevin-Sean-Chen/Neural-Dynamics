@@ -32,7 +32,7 @@ mpl.rcParams['text.latex.unicode']=True
 # %% Stimuli
 T = 10000
 D = 3
-smooth = 100
+smooth = 10
 noise = np.random.randn(T,D)
 X = noise.copy()
 for ii in range(D):
@@ -296,7 +296,7 @@ Phi = np.random.randn(D,N)
 X = stim_D(D)
 si = spiking(X, Phi, 0.1)  #different targeted spiks
 Jij = iter_NE(si,its,gamma)  #NE inference
-    
+
 for ii in range(len(dd)):
     si_ = si[:ii,:]
     Jij_ = Jij[:ii,:ii]
@@ -308,13 +308,14 @@ for ii in range(len(dd)):
 
 # %%
 plt.figure()
-plt.plot(1/Ts,asyms,'-o',markersize=15)
+plt.plot(ss,asyms,'-o',markersize=15)
 plt.xlabel(r'$\sigma$',fontsize=40)
 plt.ylabel('$\eta$',fontsize=40)
 plt.figure()
 plt.plot(nn,np.abs(eps),'-o',markersize=15)
-plt.xlabel(r'$\alpha$',fontsize=40)
+plt.xlabel('$d$',fontsize=40)
 plt.ylabel('$EP$',fontsize=40)
+
 # %%
 plt.figure()
 plt.plot(nn,cofs/control,'-o',markersize=15)
@@ -323,6 +324,6 @@ plt.ylabel('$D^*/D_{ind}$',fontsize=40)
 
 # %%
 plt.figure()
-plt.plot(nn, cofs*10,'-o',markersize=15)
-plt.xlabel(r'$N$',fontsize=40)
+plt.plot(nn, cofs*1,'-o',markersize=15)
+plt.xlabel(r'$d$',fontsize=40)
 plt.ylabel('$D^*$',fontsize=40)
