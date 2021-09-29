@@ -17,22 +17,29 @@ sns.set_style("white")
 sns.set_context("talk")
 
 from torch.nn.functional import binary_cross_entropy, binary_cross_entropy_with_logits
-from torch.utils.data import DataLoader
-from torchvision.datasets import MNIST
+#from torch.utils.data import DataLoader
+#from torchvision.datasets import MNIST
 from torchvision.transforms import ToTensor
 from torchvision.utils import make_grid
 
 # %% Simple rate RNN generative model
-dt, T, N, tau, s = 0.01, 100, 20, .1, 0.5
+dt, T, N, tau, s = 0.01, 100, 20, 1, .5
 v1, v2 = np.random.randn(N), np.random.randn(N)
 Jij = s*np.sqrt(N)*np.random.randn(N,N) #+ np.outer(v1,v1) + np.outer(v2,v2) +np.outer(v１,v２)
+### Mask for sparsity
+sparsity = 0.6
+M = np.random.rand(N,N)
+M[M<sparsity] = 0
+M[M > 0] = 1
+Jij = Jij*M  #imposing no connection for ij
+
 params = Jij, dt, T, N, s, tau
 def sigmoid(x):
     return 1/(1+np.exp(-x))
 def rateRNN(params):
     Jij, dt, T, N, s, tau = params
     lt = int(T/dt)
-    II = np.random.randn(N,lt)*1
+    II = np.random.randn(N,lt)*.1
     xs = np.zeros((N,lt))
     for tt in range(lt-1):
         xs[:,tt+1] = xs[:,tt] + dt*1/tau*(-xs[:,tt] + Jij @ sigmoid(xs[:,tt]) + II[:,tt])
@@ -42,14 +49,20 @@ xs, II = rateRNN(params)
 plt.figure()
 plt.imshow(xs,aspect='auto')
 N, lt = xs.shape
+plt.figure()
+plt.plot(xs.T)
 
 # %% Model-based decoder
 class MyRNN(torch.nn.Module):
-    def __init__(self, N, lt):  #response and input
+    def __init__(self, N, lt, M):  #response and input
         super().__init__()
         self.N, self.lt = N, lt
+        self.M = torch.Tensor(M)
         Jij = torch.zeros(N, N)
         self.Jij = torch.nn.Parameter(Jij)  #connectivity
+        #######################################################################
+        self.Jij = torch.nn.Parameter(self.Jij * self.M)
+#        self.wfx.weight = torch.nn.parameter.Parameter((self.wfx.weight.data * self.mask_use))
         
     def forward(self, II):
         x_ = torch.zeros(self.N,self.lt)
@@ -66,11 +79,11 @@ class MyRNN(torch.nn.Module):
         return t
     
 class BasicModel(torch.nn.Module):
-    def __init__(self, N, lt):
+    def __init__(self, N, lt, M):
         super().__init__()
 #        self.xs = torch.Tensor(xs)  #time series
 #        self.II = torch.Tensor(II)  #input
-        self.rnn = MyRNN(N, lt)
+        self.rnn = MyRNN(N, lt, M)
     
     def forward(self, II):
         x_ = self.rnn(II)
@@ -86,10 +99,10 @@ class BasicModel(torch.nn.Module):
             return self.rnn(II)
         
 # %%
-model = BasicModel(N,lt)
+model = BasicModel(N,lt, M)
 criterion = torch.nn.MSELoss() 
 optimizer = torch.optim.Adam(params=model.parameters(), lr=1e-2)
-for _ in range(30):
+for _ in range(10):
     xs, II = rateRNN(params)
     x_ = model( II )
     # get loss for the predicted output
