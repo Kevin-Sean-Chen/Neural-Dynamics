@@ -30,7 +30,7 @@ mpl.rcParams['text.latex.unicode']=True
 # %% Kinetic Ising model
 ###############################################################################
 # %% Stimuli
-T = 10000
+T = 1000
 D = 3
 smooth = 10
 noise = np.random.randn(T,D)
@@ -40,9 +40,9 @@ for ii in range(D):
     #X[:,ii] = np.convolve(noise[:,1],np.ones(smooth),'same') + np.random.randn(T)*3  #correlated
 
 # %% Network settings
-N = 10
+N = 50
 Phi = np.random.randn(D,N)
-J = np.random.randn(N,N)/N**0.5 /10
+J = np.random.randn(N,N)/N**0.5 /1
 #J = J-np.diag(J)
 #vv = np.random.randn(N)
 #J = np.outer(vv,vv)*0.1 + np.random.randn(N,N)*0.05
@@ -77,13 +77,13 @@ def Kinetic_Ising(X,Phi,J,kbT):
             S[ss,tt+1] = Transition(S[ss,tt],Theta[ss],beta)
     return S
 
-kbT = .1
+kbT = .2
 S = Kinetic_Ising(X,Phi,J,kbT)
 
 plt.figure()
-plt.imshow(S, aspect='auto')
-plt.xlabel('$time$',fontsize=40)
-plt.ylabel('$cell$',fontsize=40)
+plt.imshow(S[:,:], aspect='auto')
+plt.xlabel('time',fontsize=40)
+plt.ylabel('cell',fontsize=40)
 
 # %% Iterations
 ###############################################################################
@@ -94,31 +94,47 @@ J0 = np.linalg.pinv(Cij)
 
 # %% looping
 its = 500
-gamma = 0.01
-Jij = copy.deepcopy(J0)  #Jij connectivity
-ht = (X @ Phi).T #np.zeros((N,T))  #local field through time
+gamma = 0.1
+Jij = copy.deepcopy(J0)*10  #Jij connectivity
+Jij = np.cov(S)
+ht = 1*(X @ Phi).T #np.zeros((N,T))  #local field through time
 Ls = np.zeros(its)
+beta = 1#1/kbT
 for ii in range(its):
     dLt = 0
     dLs = 0
     for tt in range(T-1):
         #ht[:,tt] = X[tt,:] @ Phi  #cheating here for now
-        ht[:,tt] = ht[:,tt] + (1)*gamma*(si[:,tt+1] - np.tanh(Current(ht[:,tt],Jij,si[:,tt])))
-        dLt = dLt + (1)*(si[:,tt+1][:,None] - np.tanh(Current(ht[:,tt],Jij,si[:,tt]))[:,None]) @ si[:,tt][:,None].T
+        ht[:,tt] = ht[:,tt] + (beta)*gamma*(si[:,tt+1] - np.tanh(beta*Current(ht[:,tt],Jij,si[:,tt])))
+        dLt = dLt + (beta)*(si[:,tt+1][:,None] - np.tanh(beta*Current(ht[:,tt]*0,Jij,si[:,tt]))[:,None]) @ si[:,tt][:,None].T
         dLs = dLs + ht[:,tt]*si[:,tt+1] - np.log(2*np.cosh(ht[:,tt]))
     dL = dLt/T
     Jij = Jij + gamma*dL
     Ls[ii] = np.sum(dLs)
+
+# try without input: w/o x in current
 
 # %% Jij reconstruction
 #Jij = Jij - np.diag(Jij)
 m = Jij.shape[0]
 idx = (np.arange(1,m+1) + (m+1)*np.arange(m-1)[:,None]).reshape(m,-1)
 out = Jij.ravel()[idx]
+
+#out = iter_NE(si,500,gamma)
 plt.figure()
 plt.plot(J[:],out[:],'k.',Markersize=15)
 plt.xlabel(r'$J_{ij}$',fontsize=40)
 plt.ylabel('$\hat{J_{ij}}$',fontsize=40)
+
+
+# %% MF tests
+J_nMF = nMF(si,kbT)
+plt.figure()
+plt.plot(J[:],J_nMF[:],'k.',Markersize=15)
+plt.xlabel(r'$J_{ij}$',fontsize=40)
+plt.ylabel('$\hat{J_{ij}}_{MF}$',fontsize=40)
+#plt.xlim([-0.035,0.035])
+#plt.ylim([-0.035,0.035])
 
 # %% X stimuli reconstruction
 X_rec = ht.T @ np.linalg.pinv(Phi)
@@ -173,8 +189,8 @@ def iter_NE(si,its,gamma):
         dLt = 0
         for tt in range(T-1):
             #ht[:,tt] = X[tt,:] @ Phi  #cheating here for now
-            ht[:,tt] = ht[:,tt] + (1)*gamma*(si[:,tt+1] - np.tanh(Current(ht[:,tt],Jij,si[:,tt])))
-            dLt = dLt + (1)*(si[:,tt+1][:,None] - np.tanh(Current(ht[:,tt],Jij,si[:,tt]))[:,None]) @ si[:,tt][:,None].T
+            ht[:,tt] = ht[:,tt] + (beta)*gamma*(si[:,tt+1] - np.tanh(beta*Current(ht[:,tt],Jij,si[:,tt])))
+            dLt = dLt + (beta)*(si[:,tt+1][:,None] - np.tanh(beta*Current(ht[:,tt],Jij,si[:,tt]))[:,None]) @ si[:,tt][:,None].T
         dL = dLt/T
         Jij = Jij + gamma*dL
     return Jij
@@ -184,9 +200,9 @@ def iter_decoding(J, kbT, X, Phi, si):
     boundm = si.copy()
     boundm[np.where(boundm>0)] = boundm[np.where(boundm>0)]-ees
     boundm[np.where(boundm<0)] = boundm[np.where(boundm<0)]+ees
-    h_nMF = kbT*np.arctanh(boundm) - J @ boundm
-    h_nMF = 1*np.arctanh(boundm) - J @ boundm  #not real mean field!!
-    h_nMF[np.isinf(h_nMF)] = 0  #cheating here
+#    h_nMF = 1/kbT*np.arctanh(boundm) - J @ boundm
+    h_nMF = np.arctanh(boundm) - J @ boundm  #not real mean field!!
+    h_nMF[np.isinf(h_nMF)] = 0  #removal here
     X_rec = (Phi @ h_nMF).T
     cof = np.corrcoef(X.reshape(-1),X_rec.reshape(-1))[0][1]
     return cof
@@ -199,6 +215,7 @@ def stim_gen(par):
     return X
 
 def stim_SDE(a,tau):
+    #D = 2  ## for 2D-cross-correlation
     X = np.zeros((T,D))
     A = np.ones((D,D))*a
     np.fill_diagonal(A,-np.ones(D))
@@ -220,6 +237,59 @@ def EP(J,S):
     ep = np.sum(jj @ dd)
     return ep
 
+# %%
+def stim_bistable(par):
+    X = np.random.randn(T,D)
+    for ii in range(D):
+        X[:,ii] = np.convolve(noise[:,ii],np.ones(100),'same')
+    state = np.sin(np.arange(0,T)/50)
+    pos_h = np.where(state>0.5)[0]
+    pos_l = np.where(state<=0.5)[0]
+    X[pos_h,:] = X[pos_h,:]+par
+    X[pos_l,:] = X[pos_l,:]-par
+    
+    return X
+
+X = stim_bistable(20)
+plt.figure()
+plt.subplot(121)
+plt.plot(X)
+aa,bb=np.histogram(sp.stats.zscore(X).reshape(-1),bins=100)
+plt.subplot(122)
+plt.plot(bb[:-1],aa)
+p_x = aa/sum(aa)
+dU = -np.log(p_x[np.argmin(np.abs(bb-0))])
+print(dU)
+
+# %%
+plt.figure()
+aa,bb=np.histogram(sp.stats.zscore(X).reshape(-1),bins=100)
+plt.plot(bb[:-1],aa/np.sum(aa))
+plt.ylabel('P(x)',fontsize=40)
+
+# %% test with bistability
+bb = np.array([0,10,20,30,35])
+px0 = np.zeros(len(bb))
+asyms = np.zeros(len(bb))
+cofs = np.zeros(len(bb))
+control = np.zeros(len(bb))
+eps = np.zeros(len(bb))
+for ii in range(len(bb)):
+    X = stim_bistable(bb[ii])
+    si = spiking(X, Phi, 0.5)  #different targeted spiks
+    Jij = iter_NE(si,its,gamma)  #NE inference
+    asyms[ii] = AS(Jij)  #record asymmetry
+    cofs[ii] = iter_decoding(Jij, 0.5, X, Phi, si)
+    control[ii] = iter_decoding(np.random.randn(N,N)/N**0.5, 0.5, X, Phi, si)
+    eps[ii] = EP(Jij, si)
+    
+    aa,binn=np.histogram(sp.stats.zscore(X).reshape(-1),bins=100)
+    p_x = aa/sum(aa)
+    neglogdU = p_x[np.argmin(np.abs(binn-0))]
+    px0[ii] = neglogdU
+
+#bar...0.2,5,0.7...
+# plt.plot(px0, eps) 
 # %% temperature
 X = stim_gen(100)
 Ts = np.arange(0.1,1.2,0.15)
@@ -229,14 +299,16 @@ control = np.zeros(len(Ts))
 eps = np.zeros(len(Ts))
 for tt in range(len(Ts)):
     si = spiking(X, Phi, Ts[tt])  #different targeted spiks
+    beta = 1/Ts[tt]  ###testing
     Jij = iter_NE(si,its,gamma)  #NE inference
     asyms[tt] = AS(Jij)  #record asymmetry
-    cofs[tt] = iter_decoding(Jij, 0.1, X, Phi, si)
-    control[tt] = iter_decoding(np.random.randn(N,N), 0.1, X, Phi, si)
+    cofs[tt] = iter_decoding(Jij, beta, X, Phi, si)
+    control[tt] = iter_decoding(np.random.randn(N,N), beta, X, Phi, si)
     eps[tt] = EP(Jij, si)
     
 # %% correlation
-ss = np.array([5,10,50,100,150,200,500])*1
+beta = 1/0.5
+ss = np.array([5,10,50,100,150,200,450])*1
 decs_ss = np.zeros(len(ss))
 asyms = np.zeros(len(ss))
 cofs = np.zeros(len(ss))
@@ -244,7 +316,7 @@ control = np.zeros(len(ss))
 eps = np.zeros(len(ss))
 for ii in range(len(ss)):
     X = stim_gen(ss[ii])
-    si = spiking(X, Phi, 0.1)  #different targeted spiks
+    si = spiking(X, Phi, 0.5)  #different targeted spiks
     Jij = iter_NE(si,its,gamma)  #NE inference
     asyms[ii] = AS(Jij)  #record asymmetry
     cofs[ii] = iter_decoding(Jij, 0.5, X, Phi, si)
@@ -252,19 +324,21 @@ for ii in range(len(ss)):
     eps[ii] = EP(Jij, si)
 
 # %% Xcorr
-aa = np.array([0.2,0.3,0.4,0.41,0.42,0.43,0.44,0.45,0.46,0.47,0.48,0.49])
+#aa = np.array([0.2,0.3,0.4,0.41,0.42,0.43,0.44,0.45,0.46,0.47,0.48,0.49])
+aa = np.array([0.2,0.3,0.4, 0.41,0.42,0.43,0.44,0.45,0.46,0.47,0.48])
 decs_ss = np.zeros(len(aa))
 asyms = np.zeros(len(aa))
 cofs = np.zeros(len(aa))
 control = np.zeros(len(aa))
 eps = np.zeros(len(aa))
 for ii in range(len(aa)):
+#    Phi_2d = np.random.randn(2,N)
     X = stim_SDE(aa[ii],100)
-    si = spiking(X, Phi, 0.1)  #different targeted spiks
+    si = spiking(X, Phi, 0.5)  #different targeted spiks
     Jij = iter_NE(si,its,gamma)  #NE inference
     asyms[ii] = AS(Jij)  #record asymmetry
-    cofs[ii] = iter_decoding(Jij, 0.1, X, Phi, si)
-    control[ii] = iter_decoding(np.random.randn(N,N), 0.1, X, Phi, si)
+    cofs[ii] = iter_decoding(Jij, 0.5, X, Phi, si)
+    control[ii] = iter_decoding(np.random.randn(N,N), 0.5, X, Phi, si)
     eps[ii] = EP(Jij, si)
     
     
@@ -278,11 +352,11 @@ for ii in range(len(nn)):
     phi = np.random.randn(nn[ii],N)
     xx = stim_D(nn[ii])
     ### way to generate higher-D stimuli here
-    si = spiking(xx, phi, 0.1)  #different targeted spiks
+    si = spiking(xx, phi, .5)  #different targeted spiks
     Jij = iter_NE(si,its,gamma)  #NE inference
     asyms[ii] = AS(Jij)  #record asymmetry
-    cofs[ii] = iter_decoding(Jij, 0.1, xx, phi, si)
-    control[ii] = iter_decoding(np.random.randn(N,N), 0.1, xx, phi, si)
+    cofs[ii] = iter_decoding(Jij, .5, xx, phi, si)
+    control[ii] = iter_decoding(np.random.randn(N,N)/N**0.5, .5, xx, phi, si)
     eps[ii] = EP(Jij, si)
 
 # %% scaling
@@ -294,7 +368,7 @@ eps = np.zeros(len(dd))
 
 Phi = np.random.randn(D,N)
 X = stim_D(D)
-si = spiking(X, Phi, 0.1)  #different targeted spiks
+si = spiking(X, Phi, 0.5)  #different targeted spiks
 Jij = iter_NE(si,its,gamma)  #NE inference
 
 for ii in range(len(dd)):
@@ -302,28 +376,29 @@ for ii in range(len(dd)):
     Jij_ = Jij[:ii,:ii]
     Phi_ = Phi[:,:ii]
     asyms[ii] = AS(Jij_)  #record asymmetry
-    cofs[ii] = iter_decoding(Jij_, 0.1, X, Phi_, si_)
-    control[ii] = iter_decoding(np.random.randn(ii,ii), 0.1, X, Phi_, si_)
+    cofs[ii] = iter_decoding(Jij_, 0.5, X, Phi_, si_)
+    control[ii] = iter_decoding(np.random.randn(ii,ii)/ii**0.5, 0.5, X, Phi_, si_)
     eps[ii] = EP(Jij_, si_)
 
 # %%
+param = nn.copy()
 plt.figure()
-plt.plot(ss,asyms,'-o',markersize=15)
+plt.plot(param,asyms,'-o',markersize=15)
 plt.xlabel(r'$\sigma$',fontsize=40)
-plt.ylabel('$\eta$',fontsize=40)
+plt.ylabel(r'$\eta$',fontsize=40)
 plt.figure()
-plt.plot(nn,np.abs(eps),'-o',markersize=15)
-plt.xlabel('$d$',fontsize=40)
+plt.plot(param,np.abs(eps),'-o',markersize=15)
+plt.xlabel(r'$\sigma$',fontsize=40)
 plt.ylabel('$EP$',fontsize=40)
 
 # %%
 plt.figure()
-plt.plot(nn,cofs/control,'-o',markersize=15)
+plt.plot(param,cofs/control,'-o',markersize=15)
 plt.xlabel(r'$\sigma$',fontsize=40)
 plt.ylabel('$D^*/D_{ind}$',fontsize=40)
 
 # %%
 plt.figure()
-plt.plot(nn, cofs*1,'-o',markersize=15)
-plt.xlabel(r'$d$',fontsize=40)
-plt.ylabel('$D^*$',fontsize=40)
+plt.plot(param, cofs*1,'-o',markersize=15)
+plt.xlabel(r'$\sigma$',fontsize=40)
+plt.ylabel('$D$',fontsize=40)

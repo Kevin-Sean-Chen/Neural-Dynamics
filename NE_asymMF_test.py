@@ -108,14 +108,16 @@ def nMF(si,kbT):
     #Dij = si[:,0:-2] @ si[:,1:-1].T - np.outer(mi[0:-2],mi[1:-1])
     Aij_nMF = beta*np.diag(1-mi**2)
     J_nMF = np.linalg.pinv(Aij_nMF) @ Dij @ np.linalg.pinv(Cij)
-    #J_nMF = -np.linalg.inv(Cij)
+#    J_nMF = -np.linalg.inv(Cij)
     return J_nMF
 
-kbT = 1.
-si = Kinetic_Ising(X, Phi, J, kbT)
-J_nMF = nMF(si,1)
+kbT = .5
+si = Kinetic_Ising(X, 1*Phi, J, kbT)
+J_nMF = nMF(si, kbT)
 plt.figure()
 plt.imshow(J_nMF,aspect='auto')
+plt.figure()
+plt.plot(J.reshape(-1), J_nMF.reshape(-1),'.')
 
 # %% decoding
 ###############################################################################
@@ -292,7 +294,7 @@ plt.plot(X,X_rec,'o')
 # %% iterative version
 ###############################################################################
 #ground truth
-rep = 50
+rep = 20
 si = np.zeros((rep, N, T))
 for r in range(rep):
     si[r,:,:] = Kinetic_Ising(X,Phi,J,kbT)

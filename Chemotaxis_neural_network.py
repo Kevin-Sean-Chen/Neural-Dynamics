@@ -217,7 +217,7 @@ def Pirouette(vv,alpha_p,lamb0):
     lambda_p = lamb0 + alpha_p*vv
     lambda_p = min(1,max(lambda_p,0))
     th = -0
-    lambda_p = 0.023/(1+np.exp(alpha_p*(vv-th))) + lamb0
+#    lambda_p = 0.023/(1+np.exp(alpha_p*(vv-th))) + lamb0
     return lambda_p
 
 def turn_angle(vv,alpha_g,gamma0):
@@ -255,19 +255,20 @@ def ang2dis(x,y,th):
 Vs = np.zeros((2,lt))
 Cs = np.zeros(lt)
 ths = np.zeros(lt)
+prt = np.zeros(lt)
 XY = np.random.randn(2,lt)
-proj = np.array([.1,.1])*1
-lamb0 = 0.005
+proj = np.array([.5,.2])*1
+lamb0 = 0.05
 gamma0 = 0.5
-alpha_p, alpha_s, alpha_g = -.00005, -.01, 0.0001
+alpha_p, alpha_s, alpha_g = -.0005, -.02, 0.0001
 dxy = np.random.randn(2)
 vv,vs = 0.55,0.05
 K = np.pi/6
-J = np.array([[0.1,-2.],[-2.,0.1]])*10
+J = np.array([[.1,-5.],[-1,.1]])*1
 for tt in range(lt-1):
     ###neural dynamics
     Vs[:,tt+1] = Vs[:,tt] + dt/tau*( -Vs[:,tt] + proj*Cs[tt] + J @ sigmoid(Vs[:,tt],1,0) ) \
-    + np.random.randn(2)*np.sqrt(dt)*.1
+    + np.random.randn(2)*np.sqrt(dt)*1
     ###behavior
     lambda_p = Pirouette(Vs[0,tt+1],alpha_p,lamb0)  #Pirouette #Cs[tt]
     if lambda_p>=np.random.rand():
@@ -281,6 +282,7 @@ for tt in range(lt-1):
     dxy = ang2dis(XY[0,tt],XY[1,tt],ths[tt+1])
     XY[:,tt+1] = XY[:,tt] + dxy*dt
     Cs[tt+1] = environment(XY[0,tt+1],XY[1,tt+1])
+    prt[tt+1] = dth
     
 # %%
 plt.figure()
@@ -324,7 +326,7 @@ def Kinetic_Ising(X,Phi,S,J,kbT):
 # %% dynamics
 N = 2
 J = np.random.randn(N,N)*0.05
-J = np.array([[0.1,-2.],[-2.,0.1]])*.1
+J = np.array([[0.2,-3.],[-3.,.8]])*.1
 #J = np.array([[0.1,-2.],[-2.,0.1]])*0.1
 h = np.random.randn(N)
 kbT = .1
@@ -340,7 +342,7 @@ plt.imshow(S,aspect='auto')
 
 # %% for chemotaxis
 lamb0 = 0.005
-gamma0 = 0.5
+gamma0 = 0.03
 alpha_p, alpha_s, alpha_g = -.00005, -.01, 0.0001
 Cs = np.zeros(T)
 ths = np.zeros(T)
@@ -351,20 +353,27 @@ for tt in range(T-1):
     proj = Cs[tt]*Phi
     S[:,tt+1] = Kinetic_Ising(proj,Phi,S[:,tt],J,kbT)
     ###behavior
-    if np.prod(S[:,tt+1])>0: #same state... change this~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    if sum(S[:,tt+1]==[1,-1])==2:  #first anti-phase
+    #np.prod(S[:,tt+1])>0: #same state... change this~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         lambda_p = Pirouette(proj[0],alpha_p,lamb0)  #Pirouette #Cs[tt]
         if lambda_p>=np.random.rand():
             dth = turn_angle(proj[0],alpha_g,gamma0)  #bias
         else:
             dcp = dc_measure(dxy,XY[0,tt],XY[1,tt])
             dth = steering(proj[1],alpha_s,dcp,K)  #weathervaning #Vs[1,tt+1]
-    else:
+    elif sum(S[:,tt+1]==[-1,1])==2:  #second anti-phase
         lambda_p = Pirouette(proj[0],alpha_p*.1,lamb0)  #Pirouette #Cs[tt]
         if lambda_p>=np.random.rand():
             dth = turn_angle(proj[0],alpha_g,gamma0)  #bias
         else:
             dcp = dc_measure(dxy,XY[0,tt],XY[1,tt])
             dth = steering(proj[1],alpha_s*10.,dcp,K)  #weathervaning #Vs[1,tt+1]
+    else:  #the other two rare states
+        dth = (np.random.randn()*np.pi - np.pi)*1
+        #(np.random.rand()*2*np.pi - np.pi)*0.1
+        
+    if dth < -np.pi:
+        dth = dth + np.pi*2
             
     ###environment
     ths[tt+1] = ths[tt]+dth
@@ -374,9 +383,47 @@ for tt in range(T-1):
 
 # %%
 plt.figure()
+y, x = np.meshgrid(np.linspace(-10, 50, 60), np.linspace(-10, 50, 60))
+plt.imshow(environment(x,y),origin='lower',extent = [-10,50,-10,50])
 plt.plot(XY[0,:],XY[1,:],'blue')
 plt.figure()
 plt.subplot(211)
 plt.imshow(S,aspect='auto',interpolation='None')
 plt.subplot(212)
 plt.plot(np.prod(S,axis=0))
+
+# %%
+###############################################################################
+# %% contextual setup
+#J = np.random.randn(2,2)
+J = np.array([[-.5,-1],[-.5,-1]])
+
+ss = np.array([[1,1],[1,-1],[-1,1],[-1,-1]])
+beta = 1
+Ps = np.zeros((4,4))  #i to j states
+Ps_d = np.zeros((4,4))  #when there is input
+inp = np.array([1,-1])  #input sign
+for ii in range(4):
+    for jj in range(4):
+        theta = 0 + J @ ss[ii,:]
+        thetai = inp + J @ ss[ii,:]
+        Ps[ii,jj] = np.prod(np.exp(-ss[jj,:]*theta*beta)/(2*np.cosh(theta*beta)))
+        Ps_d[ii,jj] = np.prod(np.exp((-ss[jj,:]*thetai)*beta)/(2*np.cosh(thetai*beta)))
+
+# %%
+plt.figure()
+#plt.imshow(Ps)
+Pf2r = Ps[0,3]
+Pt2r = Ps[1,3]
+Pf2r_d = Ps_d[0,3]
+Pt2r_d = Ps_d[1,3]
+plt.subplot(211)
+plt.bar([0,1], [Pt2r, Pt2r_d])
+plt.xticks([0,1],['+','-'])
+plt.ylabel('forword->reverse',fontsize=40)
+#plt.ylim([0,1])
+plt.subplot(212)
+plt.bar([0,1], [Pf2r, Pf2r_d])
+plt.xticks([0,1],['+','-'])
+#plt.ylim([0,1])
+plt.ylabel('turn->reverse',fontsize=40)
