@@ -114,9 +114,9 @@ for mm in ms:
         ###generate prediction
         y = DNF(mm,S)  #make predictions
         ###correlation time
-#        acorr = autocorr(S)
-#        tau = exp_fit(acorr[:])
-#        tau_corr.append(1/tau)  #measure correlation time
+        acorr = autocorr(S)
+        tau = exp_fit(acorr[:])
+        tau_corr.append(1/tau)  #measure correlation time
         ###peak measurements
         xcorr = np.correlate(S,y,mode='same')  #cross-correlation
         lags = np.arange(-int(len(xcorr)/2),int(len(xcorr)/2))*dt  #time lags
@@ -137,3 +137,8 @@ plt.xlabel('tau_corr')
 plt.ylabel('delta_p')
 
 # %%plot with label
+for i in range(len(ms)):
+    plt.plot(1/Gs,peak_[:,i],'-o',label='m='+str(ms[i]))
+plt.legend()
+plt.xlabel('tau_corr')
+plt.ylabel('delta_p')
