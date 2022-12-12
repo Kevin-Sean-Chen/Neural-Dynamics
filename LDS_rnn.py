@@ -89,6 +89,7 @@ class LDSBern_inference():
         self.ny = C.shape[0]
         self.ni = ss.shape[0]
         self.logEvidence = 0
+        self.logEvTrace = []
         
     def z_MAP_compute(self, prs=None, zz0=None):
         """
@@ -123,19 +124,22 @@ class LDSBern_inference():
                 
         ### setup optimization for posterior
         postargs = [Cm, self.yy.reshape(-1), Qinv_tile, C, ii.reshape(-1), jj.reshape(-1), muz.reshape(-1)]
-        
-#        neglogpost, _, zzHess = self.neg_log_posterior(zz0.reshape(-1), postargs)
-#        print(neglogpost, zzHess)
 
 #        result = minimize(self.neg_log_handle, zz0.reshape(-1), args=(postargs), method='Newton-CG',\
 #                          jac = f_jac(postargs), hess= f_hes(postargs), options={'maxiter':10, 'gtol':1e-6, 'disp':True})
-        
-        result = minimize(self.neg_log_posterior, zz0.reshape(-1), args=(postargs), \
-                           jac=True, hess=True, method='BFGS', options={'maxiter':10, 'gtol':1e-6, 'disp':True})
-        
-#        print('test')
-        zmap = result.x
-        z_map = zmap.reshape(zz0.shape)
+        ###
+        # Need to double check here if z_map is used for M-step
+        ###
+        if prs is not None:
+            # use the estimation from E-step for M-step calculations
+            zmap = zz0*1
+            z_map = zmap.reshape(self.nz,self.nT)
+        else:
+            # compute MAP of the latent in E-step
+            result = minimize(self.neg_log_posterior, zz0.reshape(-1), args=(postargs), \
+                               jac=True, hess=True, method='Newton-CG', options={'maxiter':100, 'gtol':1e-6, 'disp':True})
+            zmap = result.x
+            z_map = zmap.reshape(self.nz,self.nT) #(zz0.shape)
         
         ### compute the log-evidence
         neglogpost, _, zzHess = self.neg_log_posterior(zmap, postargs)
@@ -196,7 +200,7 @@ class LDSBern_inference():
         Hess = Hess + Qinv
         return nll, grad, Hess
     
-    def run_Mstep_LapEvd(self):
+    def run_Mstep_LapEvd(self, zz_map):
         """
         M-step with Laplace approximation of the evidence
         Update parameters by maximizing the evidence
@@ -206,27 +210,25 @@ class LDSBern_inference():
         # postargs [self.yy, self.ny, self.Q]
         
         # compute MAP estimate
-#        test = self.neg_log_evd_handle(prs0)
-#        print(test)
         ###
         # Need to double check here if z_map is used for M-step
         ###
-        result = minimize(self.neg_log_evd_handle, prs0,  \
-                          hess=True, method='BFGS', options={'maxiter':10, 'gtol':1e-6, 'disp':True})
+        result = minimize(self.neg_log_evd_handle, prs0, args=(zz_map),  \
+                          hess=True, method='Newton-CG', options={'maxiter':100, 'gtol':1e-6, 'disp':True})
         prs_hat = result.x
         
         ### parameter update
         Ahat, Chat = self.unvecLDSprs(prs_hat)
         self.A = Ahat
         self.C = Chat
-        self.logEvidence = -self.neg_log_evd_handle(prs_hat)
+        self.logEvidence = -self.neg_log_evd_handle(prs_hat, zz_map)
         return None
     
-    def neg_log_evd_handle(self, prs0):
+    def neg_log_evd_handle(self, prs0, zz_map):
         """
         Handle to return evidence for parameter optimization
         """
-        zzmap, logevd = self.z_MAP_compute(prs=prs0)
+        zzmap, logevd = self.z_MAP_compute(prs=prs0, zz0=zz_map)
         neglogEvd = -logevd
         return neglogEvd
     
@@ -245,26 +247,26 @@ class LDSBern_inference():
         """
         Main part running EM!
         """
-        logEvTrace = np.zeros(iters)
+        self.logEvTrace = np.zeros(iters)
         dlogp, dlogtol, dlogp_prev = np.inf, tol, -np.inf
         jj = 0
         
         while jj<iters:# and dlogp>dlogtol:
-            jj = jj+1
             
             # E-step: optimizing for latent z
             zzmap, logp = self.z_MAP_compute()
-            logEvTrace[jj] = logp
+            self.logEvTrace[jj] = logp
             
             # M-step: optimizaing for parameters
-            self.run_Mstep_LapEvd()
+            self.run_Mstep_LapEvd(zzmap.reshape(-1))
             
             # update log-likelihood
             dlogp = dlogp - dlogp_prev
             dlogp_prev = dlogp
             
             # display progrss
-            print('EM step '+jj+' logP= '+logp)
+            print('EM step '+str(jj)+' logP= '+str(logp))
+            jj = jj+1
                 
         return None
     
@@ -296,4 +298,7 @@ lds_inf.run_LEM(10, 0.001)
 
 
 # %% plotting!!
+zmap_inf,_ = lds_inf.z_MAP_compute()
+plt.figure()
+plt.plot(zmap_inf.T)
 
