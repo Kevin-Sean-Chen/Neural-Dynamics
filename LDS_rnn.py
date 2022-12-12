@@ -7,10 +7,10 @@ Created on Thu Dec  8 11:22:19 2022
 """
 import numpy as np
 from matplotlib import pyplot as plt
-import scipy as sp
 from scipy.sparse import spdiags
 from scipy import sparse
 from scipy.optimize import minimize
+from scipy.sparse.linalg import splu
 
 import matplotlib 
 matplotlib.rc('xtick', labelsize=25) 
@@ -76,7 +76,6 @@ plt.imshow(yy, aspect='auto')
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %% Inference!!
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-# %%
 class LDSBern_inference():
     def __init__(self, LDS_params, data):
         self.A = LDS_params[0]
@@ -105,7 +104,7 @@ class LDSBern_inference():
         
         ### for evidence optimization for parameters
         if prs is not None:
-            A,C = self.unvecLDSprs(prs, self.ny)
+            A,C = self.unvecLDSprs(prs)
         else:
             A,C = self.A, self.C
             
@@ -124,7 +123,17 @@ class LDSBern_inference():
                 
         ### setup optimization for posterior
         postargs = [Cm, self.yy.reshape(-1), Qinv_tile, C, ii.reshape(-1), jj.reshape(-1), muz.reshape(-1)]
-        result = minimize(self.neg_log_handle, zz0.reshape(-1), args=(postargs))
+        
+#        neglogpost, _, zzHess = self.neg_log_posterior(zz0.reshape(-1), postargs)
+#        print(neglogpost, zzHess)
+
+#        result = minimize(self.neg_log_handle, zz0.reshape(-1), args=(postargs), method='Newton-CG',\
+#                          jac = f_jac(postargs), hess= f_hes(postargs), options={'maxiter':10, 'gtol':1e-6, 'disp':True})
+        
+        result = minimize(self.neg_log_posterior, zz0.reshape(-1), args=(postargs), \
+                           jac=True, hess=True, method='BFGS', options={'maxiter':10, 'gtol':1e-6, 'disp':True})
+        
+#        print('test')
         zmap = result.x
         z_map = zmap.reshape(zz0.shape)
         
@@ -132,9 +141,25 @@ class LDSBern_inference():
         neglogpost, _, zzHess = self.neg_log_posterior(zmap, postargs)
         
         ### compute log-evidence
-        logEv = -neglogpost + 0.5*np.linalg.logdet(Qinv) - 0.5*np.linalg.logdet(zzHess)
+        logdet_z = self.logdet(zzHess)
+        logdet_q = self.logdet(Qinv)
+        logEv = -neglogpost + 0.5*logdet_q - 0.5*logdet_z
             
         return z_map, logEv
+    
+    def logdet(self,M):
+        """
+        # The determinant det(M) can be then represented as: det(M) = det(LU) = det(L)det(U)
+        # The determinant of triangular matrices is just the product of the diagonal terms:
+        """
+        lu = splu(M)
+        diagL = lu.L.diagonal()
+        diagU = lu.U.diagonal()
+#        d = diagL.prod()*diagU.prod()
+        diagL = diagL.astype(np.complex128)
+        diagU = diagU.astype(np.complex128)
+        logd = np.real(np.log(diagL).sum() + np.log(diagU).sum())
+        return logd
     
     def neg_log_handle(self,zz,args):
         """
@@ -150,7 +175,7 @@ class LDSBern_inference():
         """
         # loading
         Cm, yy, Qinv, C, ii, jj, muz = args
-        
+
         # Compute projection of inputs onto GLM weights for each class
         xproj = Cm @ zz # + muy  # "logit" of input to latent
         zzctr = zz - muz  # zero-mean latent
@@ -167,7 +192,7 @@ class LDSBern_inference():
         # compute Hessian
         Cddf = C.T[:,:,None] * np.reshape(ddf,(1,self.ny,-1))
         CddfC = np.array([ci.T @ C for ci in Cddf.T]).T  # weird python way to do pagemtimes...
-        Hess = sp.sparse(ii,jj,CddfC.reshape(-1))
+        Hess = sparse.csr_matrix((CddfC.reshape(-1),(ii,jj)), shape=(Cm.shape[1], Cm.shape[1]))
         Hess = Hess + Qinv
         return nll, grad, Hess
     
@@ -177,11 +202,17 @@ class LDSBern_inference():
         Update parameters by maximizing the evidence
         """
         # prepare arguments
-        prs0 = [self.A.reshape(-1), self.C.reshape(-1)]  # initial params
+        prs0 = np.concatenate([self.A.reshape(-1), self.C.reshape(-1)])  # initial params
         # postargs [self.yy, self.ny, self.Q]
         
         # compute MAP estimate
-        result = minimize(self.neg_log_evd_handle, prs0)
+#        test = self.neg_log_evd_handle(prs0)
+#        print(test)
+        ###
+        # Need to double check here if z_map is used for M-step
+        ###
+        result = minimize(self.neg_log_evd_handle, prs0,  \
+                          hess=True, method='BFGS', options={'maxiter':10, 'gtol':1e-6, 'disp':True})
         prs_hat = result.x
         
         ### parameter update
@@ -195,7 +226,7 @@ class LDSBern_inference():
         """
         Handle to return evidence for parameter optimization
         """
-        zzmap, logevd = self.z_MAP_compute(prs0)
+        zzmap, logevd = self.z_MAP_compute(prs=prs0)
         neglogEvd = -logevd
         return neglogEvd
     
@@ -203,10 +234,11 @@ class LDSBern_inference():
         """
         Return matrices from the parameter vectors
         """
+#        prs = np.concatenate(prs)
         nAprs = self.nz**2
         nACprs = nAprs + self.nz*self.ny  # parameters in A and C matrix
-        A = np.reshape(prs[:nAprs], self.nz, self.nz)
-        C = np.reshape(prs[nAprs:nACprs], self.ny, self.nz)
+        A = prs[:nAprs].reshape(self.nz, self.nz)
+        C = prs[nAprs:nACprs].reshape(self.ny, self.nz)
         return A,C
     
     def run_LEM(self, iters, tol):
@@ -217,7 +249,7 @@ class LDSBern_inference():
         dlogp, dlogtol, dlogp_prev = np.inf, tol, -np.inf
         jj = 0
         
-        while jj<iters and dlogp>dlogtol:
+        while jj<iters:# and dlogp>dlogtol:
             jj = jj+1
             
             # E-step: optimizing for latent z
@@ -261,4 +293,7 @@ data = [yy,ss]
 
 lds_inf = LDSBern_inference(LDS_params, data)
 lds_inf.run_LEM(10, 0.001)
+
+
+# %% plotting!!
 
