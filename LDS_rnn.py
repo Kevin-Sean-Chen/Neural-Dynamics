@@ -143,7 +143,8 @@ class LDSBern_inference():
             z_map = zmap.reshape(self.nz,self.nT) #(zz0.shape)
         
         ### compute the log-evidence
-        neglogpost, _, zzHess = self.neg_log_posterior(zmap, postargs,True)
+        neglogpost = self.neg_log_posterior(zmap, postargs,False)
+        zzHess = self.neg_log_post_hess(zmap, postargs, True)
         
         ### compute log-evidence
         logdet_z = self.logdet(zzHess)
@@ -157,7 +158,7 @@ class LDSBern_inference():
         # The determinant det(M) can be then represented as: det(M) = det(LU) = det(L)det(U)
         # The determinant of triangular matrices is just the product of the diagonal terms:
         """
-        lu = splu(M)
+        lu = splu(sparse.csc_matrix(M))
         diagL = lu.L.diagonal()
         diagU = lu.U.diagonal()
 #        d = diagL.prod()*diagU.prod()
@@ -215,12 +216,11 @@ class LDSBern_inference():
         grad = Cm.T @ (df-yy) + Qinv @ zzctr  # gradient
         return grad
     
-    def neg_log_post_hess(self,zz,args,div_logic=False):
+    def neg_log_post_hess(self,zz,args,sparse_logic=False):
         # loading
         Cm, yy, Qinv, C, ii, jj, muz = args
         # Compute projection of inputs onto GLM weights for each class
         xproj = Cm @ zz # + muy  # "logit" of input to latent
-        zzctr = zz - muz  # zero-mean latent
         # compute gradient
         f,df,ddf = self.softplus(xproj)  # log normed and derivative
         # compute Hessian
@@ -228,7 +228,9 @@ class LDSBern_inference():
         CddfC = np.array([ci.T @ C for ci in Cddf.T]).T  # weird python way to do pagemtimes...
         Hess = sparse.csr_matrix((CddfC.reshape(-1),(ii,jj)), shape=(Cm.shape[1], Cm.shape[1]))
         Hess = Hess + Qinv
-        return Hess.todense()
+        if not sparse_logic:
+            return Hess.todense()
+        return Hess
     
     def run_Mstep_LapEvd(self, zz_map):
         """
