@@ -136,13 +136,14 @@ class LDSBern_inference():
             z_map = zmap.reshape(self.nz,self.nT)
         else:
             # compute MAP of the latent in E-step
+#            obj, jac, hess = self.neg_log_posterior(zz0.reshape(-1), postargs,True)
             result = minimize(self.neg_log_posterior, zz0.reshape(-1), args=(postargs), \
-                               jac=True, hess=True, method='Newton-CG', options={'maxiter':100, 'gtol':1e-6, 'disp':True})
+                               jac=self.neg_log_post_jac, hess=self.neg_log_post_hess, method='Newton-CG', options={'maxiter':10, 'gtol':1e-3, 'disp':True})
             zmap = result.x
             z_map = zmap.reshape(self.nz,self.nT) #(zz0.shape)
         
         ### compute the log-evidence
-        neglogpost, _, zzHess = self.neg_log_posterior(zmap, postargs)
+        neglogpost, _, zzHess = self.neg_log_posterior(zmap, postargs,True)
         
         ### compute log-evidence
         logdet_z = self.logdet(zzHess)
@@ -169,10 +170,10 @@ class LDSBern_inference():
         """
         Handle to return nll for optimization of expected latent
         """
-        nll,_,_ = self.neg_log_posterior(zz,args)
+        nll,_,_ = self.neg_log_posterior(zz,args,False)
         return nll
     
-    def neg_log_posterior(self,zz,args):
+    def neg_log_posterior(self,zz,args,div_logic=False):
         """
         Negative log posterior for the latent z
         This is used for optimization in the MAP estimation function
@@ -189,6 +190,9 @@ class LDSBern_inference():
         nll = -np.dot(yy,xproj) + np.sum(f)  # neg-log-likelihood
         nll = nll + 0.5*np.sum(zzctr*(Qinv@zzctr))  # neg-log-posterioi
         
+        if not div_logic:
+            return nll  #used for optimization without grad and hess
+        
         # compute gradient
         f,df,ddf = self.softplus(xproj)  # log normed and derivative
         grad = Cm.T @ (df-yy) + Qinv @ zzctr  # gradient
@@ -199,6 +203,32 @@ class LDSBern_inference():
         Hess = sparse.csr_matrix((CddfC.reshape(-1),(ii,jj)), shape=(Cm.shape[1], Cm.shape[1]))
         Hess = Hess + Qinv
         return nll, grad, Hess
+    
+    def neg_log_post_jac(self,zz,args,div_logic=False):
+        # loading
+        Cm, yy, Qinv, C, ii, jj, muz = args
+        # Compute projection of inputs onto GLM weights for each class
+        xproj = Cm @ zz # + muy  # "logit" of input to latent
+        zzctr = zz - muz  # zero-mean latent
+        # compute gradient
+        f,df,ddf = self.softplus(xproj)  # log normed and derivative
+        grad = Cm.T @ (df-yy) + Qinv @ zzctr  # gradient
+        return grad
+    
+    def neg_log_post_hess(self,zz,args,div_logic=False):
+        # loading
+        Cm, yy, Qinv, C, ii, jj, muz = args
+        # Compute projection of inputs onto GLM weights for each class
+        xproj = Cm @ zz # + muy  # "logit" of input to latent
+        zzctr = zz - muz  # zero-mean latent
+        # compute gradient
+        f,df,ddf = self.softplus(xproj)  # log normed and derivative
+        # compute Hessian
+        Cddf = C.T[:,:,None] * np.reshape(ddf,(1,self.ny,-1))
+        CddfC = np.array([ci.T @ C for ci in Cddf.T]).T  # weird python way to do pagemtimes...
+        Hess = sparse.csr_matrix((CddfC.reshape(-1),(ii,jj)), shape=(Cm.shape[1], Cm.shape[1]))
+        Hess = Hess + Qinv
+        return Hess.todense()
     
     def run_Mstep_LapEvd(self, zz_map):
         """
@@ -214,7 +244,7 @@ class LDSBern_inference():
         # Need to double check here if z_map is used for M-step
         ###
         result = minimize(self.neg_log_evd_handle, prs0, args=(zz_map),  \
-                          hess=True, method='Newton-CG', options={'maxiter':100, 'gtol':1e-6, 'disp':True})
+                          options={'maxiter':10, 'gtol':1e-3, 'disp':True})
         prs_hat = result.x
         
         ### parameter update
