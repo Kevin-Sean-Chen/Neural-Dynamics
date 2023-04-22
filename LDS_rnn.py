@@ -137,7 +137,7 @@ class LDSBern_inference():
         else:
             # compute MAP of the latent in E-step
             result = minimize(self.neg_log_posterior, zz0.reshape(-1), args=(postargs), \
-                               jac=True, hess=True, method='Newton-CG', options={'maxiter':100, 'gtol':1e-6, 'disp':True})
+                               jac=True, method='Newton-CG', options={'maxiter':100, 'gtol':1e-6, 'disp':True})
             zmap = result.x
             z_map = zmap.reshape(self.nz,self.nT) #(zz0.shape)
         
